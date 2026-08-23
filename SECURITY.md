@@ -21,5 +21,6 @@ Use synthetic messages for automated tests. Revoke a credential immediately if i
 
 ## Reporting
 
-Because the repository is private, report suspected vulnerabilities directly to the repository owner through a private channel. Do not include real credentials or SMS content in the initial report.
+Use GitHub's **Security** tab and the private vulnerability-reporting form to report suspected vulnerabilities. If that form is unavailable, contact the repository owner through a private channel instead of opening a public issue.
 
+Do not include real credentials, SMS content, sender numbers, or device identifiers in the initial report. A maintainer will arrange a private channel if additional reproduction details are required.

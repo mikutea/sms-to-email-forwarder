@@ -2,11 +2,13 @@
 
 面向自有设备的短信转邮箱项目。正式工作区归属 `Projects/Server`，采用 GitHub Flow 开发。
 
+本仓库公开提供源代码与仅含合成数据的自动化测试。请勿在 Issue、Pull Request、日志或构建产物中提交 SMTP 授权码、真实短信、手机号、设备标识或签名材料。
+
 ## 平台支持边界
 
 | 平台 | 自动读取新短信 | 客户端形态 | 状态 |
 | --- | --- | --- | --- |
-| Android 8.0 及以上 | 支持 | APK | 开发中 |
+| Android 8.0 及以上 | 支持 | APK | Alpha，等待更多真机验证 |
 | HarmonyOS 2/3/4 Android 兼容环境 | 支持 | 与 Android 共用 APK | Mate 50 Pro / HarmonyOS 4.2 为首个验证目标 |
 | HarmonyOS NEXT | 普通三方应用无公开短信读取能力 | 原生 HAP 只能承担配置、状态等伴随功能 | 不宣称支持自动短信转发 |
 

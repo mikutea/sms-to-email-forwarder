@@ -60,6 +60,7 @@ public final class MainActivity extends Activity {
     private LinearLayout navigation;
     private int currentPage;
     private boolean enableAfterPermission;
+    private boolean updateDialogShowing;
 
     private EditText primaryHost;
     private EditText primaryPort;
@@ -103,6 +104,7 @@ public final class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         setContentView(buildShell());
         showPage(0);
+        checkForUpdates(false);
     }
 
     @Override
@@ -504,7 +506,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showSettingsPage() {
-        addPageTitle("系统与守护设置", "Mate 50 Pro / HarmonyOS 4.2 必须完成后台授权，单纯安装 APK 不足以保证锁屏运行。", page);
+        addPageTitle("系统与守护设置", "华为设备通常需要完成后台授权，单纯安装 APK 不足以保证锁屏运行。", page);
         LinearLayout guide = card();
         guide.addView(sectionTitle("华为后台授权"));
         CheckBox confirmed = new CheckBox(this);
@@ -558,6 +560,29 @@ public final class MainActivity extends Activity {
         importButton.setOnClickListener(view -> importConfiguration());
         backup.addView(importButton, matchWrap());
         page.addView(backup, cardParams());
+
+        LinearLayout updates = card();
+        updates.addView(sectionTitle("版本更新"));
+        updates.addView(text(
+                "当前版本：" + BuildConfig.VERSION_NAME + "（" + BuildConfig.VERSION_CODE + "）",
+                14f,
+                COLOR_MUTED,
+                false));
+        CheckBox automaticUpdates = new CheckBox(this);
+        automaticUpdates.setText("启动时每天最多检查一次 GitHub Releases");
+        automaticUpdates.setChecked(UpdateChecker.isAutomaticEnabled(this));
+        automaticUpdates.setOnCheckedChangeListener(
+                (button, checked) -> UpdateChecker.setAutomaticEnabled(this, checked));
+        updates.addView(automaticUpdates);
+        Button checkUpdate = secondaryButton("立即检查更新");
+        checkUpdate.setOnClickListener(view -> checkForUpdates(true));
+        updates.addView(checkUpdate, matchWrap());
+        updates.addView(text(
+                "自动检查只访问本项目公开 GitHub Release，不上传短信、邮箱配置或设备标识；安装仍由系统确认。",
+                13f,
+                COLOR_MUTED,
+                false));
+        page.addView(updates, cardParams());
 
         addNotice("强制停止、关机、重启后尚未首次解锁、SIM 失去服务或 SMTP 服务商延迟都超出普通 App 的控制范围。", page);
     }
@@ -792,6 +817,69 @@ public final class MainActivity extends Activity {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         intent.setData(Uri.parse("package:" + getPackageName()));
         startActivity(intent);
+    }
+
+    private void checkForUpdates(boolean manual) {
+        if (!manual && !UpdateChecker.beginAutomaticCheck(this, System.currentTimeMillis())) {
+            return;
+        }
+        if (manual) {
+            showToast("正在检查 GitHub 正式版本…");
+        }
+        executor.execute(() -> {
+            UpdateChecker.ReleaseInfo release = null;
+            String errorMessage = null;
+            try {
+                release = UpdateChecker.fetchLatest();
+            } catch (Exception error) {
+                errorMessage = ForwardProcessor.safeMessage(error);
+            }
+            UpdateChecker.ReleaseInfo result = release;
+            String failure = errorMessage;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                if (failure != null) {
+                    if (manual) {
+                        showToast("检查更新失败：" + failure);
+                    }
+                    return;
+                }
+                if (result == null) {
+                    if (manual) {
+                        showToast("项目尚未发布稳定版本");
+                    }
+                    return;
+                }
+                if (!UpdateChecker.isNewer(result.version, BuildConfig.VERSION_NAME)) {
+                    if (manual) {
+                        showToast("当前已经是最新稳定版本");
+                    }
+                    return;
+                }
+                showUpdateDialog(result);
+            });
+        });
+    }
+
+    private void showUpdateDialog(UpdateChecker.ReleaseInfo release) {
+        if (updateDialogShowing) {
+            return;
+        }
+        updateDialogShowing = true;
+        String notes = release.notes.isEmpty() ? "请前往项目官方发布页查看更新内容。" : release.notes;
+        new AlertDialog.Builder(this)
+                .setTitle("发现雁笺 " + release.version)
+                .setMessage(notes
+                        + "\n\n将打开项目官方 GitHub Release。下载和安装都需要你确认，Android 会校验 APK 签名。")
+                .setNegativeButton("稍后", null)
+                .setPositiveButton("查看正式发布", (dialog, which) -> {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl));
+                    startActivity(intent);
+                })
+                .setOnDismissListener(dialog -> updateDialogShowing = false)
+                .show();
     }
 
     private void shareDiagnostics() {

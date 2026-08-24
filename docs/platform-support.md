@@ -2,7 +2,7 @@
 
 ## Android 与鸿蒙 2/3/4
 
-Android 提供 `SMS_RECEIVED_ACTION`，持有 `RECEIVE_SMS` 权限的应用可以收到新短信广播。鸿蒙 4.2 的首个目标设备将通过 Android 兼容 APK 进行真机验证。
+Android 提供 `SMS_RECEIVED_ACTION`，持有 `RECEIVE_SMS` 权限的应用可以收到新短信广播。保留 Android APK 兼容能力的鸿蒙设备需要逐台完成真机验证。
 
 参考：
 
@@ -29,4 +29,3 @@ Android 提供 `SMS_RECEIVED_ACTION`，持有 `RECEIVE_SMS` 权限的应用可�
 3. 一台保留 Android/鸿蒙 4.x 的受控设备作为短信入口。
 
 此时 NEXT HAP、Android APK 和网页端都只访问同一配置与状态服务，不再依赖 NEXT 读取系统短信。
-

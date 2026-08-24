@@ -2,6 +2,17 @@ plugins {
     id("com.android.application")
 }
 
+val releaseStoreFile = providers.environmentVariable("YANJIAN_KEYSTORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("YANJIAN_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("YANJIAN_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("YANJIAN_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.server.smsforwarder"
     compileSdk = 35
@@ -16,9 +27,27 @@ android {
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("releaseFromEnvironment") {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("releaseFromEnvironment")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -43,10 +72,23 @@ android {
     }
 }
 
+tasks.register("printVersionName") {
+    doLast {
+        print(android.defaultConfig.versionName)
+    }
+}
+
+tasks.register("printVersionCode") {
+    doLast {
+        print(android.defaultConfig.versionCode)
+    }
+}
+
 dependencies {
     implementation("androidx.work:work-runtime:2.11.2")
     implementation("com.google.re2j:re2j:1.8")
     implementation("com.sun.mail:android-mail:1.6.8")
     implementation("com.sun.mail:android-activation:1.6.8")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
 }

@@ -214,7 +214,10 @@ public final class MainActivity extends Activity {
         scroll.addView(page, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
-        shell.addView(scroll, new LinearLayout.LayoutParams(0, 0, 1f));
+        shell.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
         return shell;
     }
 

@@ -117,7 +117,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // Keep user content out of screenshots in distributable builds while allowing
+        // emulator screenshot comparison and automated visual QA for debug builds.
+        if (!BuildConfig.DEBUG) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
         getWindow().setStatusBarColor(COLOR_PAPER);
         getWindow().setNavigationBarColor(COLOR_PAPER);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);

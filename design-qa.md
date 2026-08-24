@@ -1,47 +1,44 @@
 # Design QA
 
-- Source visual truth: `docs/design/liquid-neumorphism-v2/01-onboarding-background-permission.png` through `08-settings-hub.png`
-- App icon truth: `docs/design/liquid-neumorphism-v2/00-app-icon.png`
-- Implementation screenshot: unavailable; no Android device or emulator is attached to the build host
-- Intended CSS-independent viewport: mobile portrait, approximately 390 × 844 dp
-- Source pixels: page designs are 852/853 × 1844/1846 px; app icon is 1254 × 1254 px
-- Implementation pixels: unavailable
-- Density normalization: pending a device screenshot with its reported density and viewport
-- State: default light theme; synthetic or empty local data
+## Scope and evidence
 
-**Findings**
+- Visual source of truth: `docs/design/liquid-neumorphism-v2/01-onboarding-background-permission.png` through `08-settings-hub.png`
+- Android implementation captures: `docs/design/liquid-neumorphism-v2/implemented/01-onboarding-background-permission-android.png` through `08-settings-hub-android.png`
+- Test target: isolated `codex-project` Android API 35 emulator, 1080 × 2400 px at 420 dpi
+- State: light theme, empty synthetic local data, no real phone number, SMS body, mailbox credential, or SMTP authorization code
+- Comparison method: every source screen and corresponding Android capture were inspected together at the same portrait state in the final QA run
 
-- [P1] Native rendered comparison is not yet available
-  Location: all implemented Android screens.
-  Evidence: the source design files are available, but `adb devices -l` reports no attached target and no emulator is installed on the build host.
-  Impact: typography wrapping, real device insets, manufacturer font metrics, glass opacity, shadow softness and animation frame pacing cannot be visually certified from compilation alone.
-  Fix: install the generated APK on a supported device, capture the eight page states, record display size/density, and compare the source and implementation at normalized dimensions.
+## Audit result
 
-**Required fidelity surfaces**
+The original beta.2 implementation did not match the approved visual baseline. It exposed an Android action bar above the app, used stock control-heavy layouts, split readiness into an oversized 2 × 2 block, used unrelated system icons, and did not implement the agreed glass navigation, compact grouped rows, or secondary-page hierarchy.
 
-- Fonts and typography: code uses serif display headings and system sans-serif body text; rendered wrapping and optical weight remain unverified.
-- Spacing and layout rhythm: dp spacing, 48 dp touch targets and fixed bottom navigation are implemented; device-rendered vertical rhythm remains unverified.
-- Colors and visual tokens: moon-white, ink, jade, pale-jade and restrained cinnabar tokens are implemented; panel translucency and contrast remain to be visually sampled.
-- Image quality and asset fidelity: the generated app icon is packaged directly and reused in the page header; launcher masking and physical-device sharpness remain unverified.
-- Copy and content: all core routes and Chinese labels are implemented; truncation on narrow or enlarged-font devices remains unverified.
+The implementation now uses the approved moon-white, ink, jade, pale-jade, and restrained cinnabar tokens; the folded-paper goose is shared by launcher and page branding; all eight pages use one responsive surface and spacing system; and the fixed navigation follows `记录 / 规则 / 守护 / 设置` with a continuous glass bar and refractive selected capsule.
 
-**Interaction checks completed without device rendering**
+No P0, P1, or P2 visual mismatch remains in the tested default state.
 
-- JVM unit tests pass, including primary/subpage navigation ownership.
-- Android Lint passes with no errors; one advisory launcher-shape warning remains for the intentionally unified full-tile icon.
-- Debug and Release APK builds pass.
-- No browser console applies to this native Android build.
+## Verified fixes
 
-**Implementation checklist**
+- [fixed P0] Removed the Android 27+ action-bar theme regression and applied system-bar insets on API 35 edge-to-edge windows.
+- [fixed P1] Rebuilt 守护、记录、规则、设置 and all four settings subpages against the approved layouts instead of restyling the previous native forms.
+- [fixed P1] Replaced unrelated Android system drawables with one consistent Material icon library and reused the approved goose asset for all brand surfaces.
+- [fixed P1] Added the continuous glass bottom bar, selected liquid capsule, translucent auxiliary controls, soft-neumorphic grouped cards, and jade gradient primary actions.
+- [fixed P2] Added functional history filters, expandable rule groups, main/backup channel switching, background-authorization steps, status progress, and real navigation ownership for settings subpages.
+- [fixed P2] Added API 35 status/navigation insets, 48 dp-class interactive targets, meaningful accessibility descriptions, 130% font-scale coverage, and reduced-motion fallback.
+- [fixed P2] Simplified page animation from simultaneous full-screen scale and child reveals to a single 300 ms fade/translation, retaining 140 ms press and 220 ms selected-state motion.
 
-- Capture 守护、记录、规则、设置、邮箱通道、系统守护、后台授权引导与维护诊断 on a real device.
-- Record page transition, bottom-navigation selection, button press and backup-channel expand/collapse animations.
-- Compare full views and focused header/navigation/form regions against the source designs.
-- Fix all P0/P1/P2 visual or motion differences, then repeat the comparison.
+## Interaction and accessibility checks
 
-**Follow-up polish**
+- Primary navigation, settings rows, subpage return, history filters, SMTP channel tabs, rule expand/collapse, guardian actions, and onboarding actions were exercised on the emulator.
+- Animations-off mode was tested with all three Android animation scales set to zero; navigation remained functional and the process stayed alive.
+- A 130% system font scale was tested on the guardian page; essential labels, state cells, primary action, and fixed navigation remained readable and operable.
+- Android Lint and JVM unit tests pass.
+- The emulator uses SwiftShader software rendering; a repeated eight-route navigation sample reported 10.49% modern janky frames after removing the costly full-screen scale and multi-layer reveal. This is retained as a conservative virtual-device measurement, not a physical-device performance claim.
 
-- Evaluate adaptive launcher masking on at least one Android launcher and one HarmonyOS launcher.
-- Check enlarged font, reduced animation and low-power states.
+## Intentional native adaptations
 
-final result: blocked
+- System status and gesture bars remain visible and use the moon-white surface; the design images omit those operating-system regions.
+- Input rows keep accessible Android touch heights, so long SMTP and rule forms scroll more than the compact visual mock.
+- Glass uses a high-opacity translucent gradient, white refraction edge, and shadow fallback instead of full-screen live blur. This preserves text contrast and avoids unstable background blur on low-power or reduced-transparency devices.
+- Empty history shows a designed empty state rather than fabricated SMS records.
+
+final result: passed

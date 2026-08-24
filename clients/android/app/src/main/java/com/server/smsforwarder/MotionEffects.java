@@ -45,22 +45,15 @@ final class MotionEffects {
         if (!enabled(view.getContext())) {
             view.setAlpha(1f);
             view.setTranslationY(0f);
-            view.setScaleX(1f);
-            view.setScaleY(1f);
             return;
         }
         view.setAlpha(0f);
         view.setTranslationY(distancePx);
-        view.setScaleX(0.992f);
-        view.setScaleY(0.992f);
         view.animate()
                 .alpha(1f)
                 .translationY(0f)
-                .scaleX(1f)
-                .scaleY(1f)
                 .setDuration(EMPHASIZED)
                 .setInterpolator(EASE_OUT)
-                .withLayer()
                 .start();
     }
 

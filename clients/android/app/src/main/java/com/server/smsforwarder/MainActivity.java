@@ -609,7 +609,7 @@ public final class MainActivity extends Activity {
 
     private void showSettingsPage() {
         addPageTitle("设置", "邮箱、守护、隐私与应用维护", page);
-        addStatusChip("所有配置仅加密保存在本机", page);
+        addStatusChip("授权码与短信敏感数据仅加密保存在本机", page);
 
         AppConfig config = AppConfig.load(this);
         RuleConfig rules = RuleConfig.load(this);

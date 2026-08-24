@@ -19,7 +19,9 @@ public final class ForwardWorker extends Worker {
                     getApplicationContext(),
                     20);
             if (result.hasPending) {
-                ForwardScheduler.scheduleFromQueue(getApplicationContext());
+                // Append the follow-up behind this running worker. Replacing the
+                // unique work here would cancel the worker before it can finish.
+                ForwardScheduler.scheduleSuccessorFromQueue(getApplicationContext());
             }
             return Result.success();
         } catch (RuntimeException error) {

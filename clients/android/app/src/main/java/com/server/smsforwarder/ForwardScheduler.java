@@ -24,14 +24,29 @@ final class ForwardScheduler {
     }
 
     static void scheduleFromQueue(Context context) {
+        scheduleFromQueue(context, ExistingWorkPolicy.REPLACE);
+    }
+
+    static void scheduleSuccessorFromQueue(Context context) {
+        scheduleFromQueue(context, ExistingWorkPolicy.APPEND_OR_REPLACE);
+    }
+
+    private static void scheduleFromQueue(Context context, ExistingWorkPolicy policy) {
         long runnableAt = QueueDatabase.get(context).earliestRunnableAt();
         if (runnableAt == 0L) {
             return;
         }
-        schedule(context, Math.max(0L, runnableAt - System.currentTimeMillis()));
+        schedule(context, Math.max(0L, runnableAt - System.currentTimeMillis()), policy);
     }
 
     static void schedule(Context context, long minimumLatencyMs) {
+        schedule(context, minimumLatencyMs, ExistingWorkPolicy.REPLACE);
+    }
+
+    private static void schedule(
+            Context context,
+            long minimumLatencyMs,
+            ExistingWorkPolicy policy) {
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build();
@@ -45,7 +60,7 @@ final class ForwardScheduler {
         }
         WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(
                 WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
+                policy,
                 builder.build());
     }
 }

@@ -10,8 +10,8 @@ android {
         applicationId = "com.server.smsforwarder"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0-beta.1"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -44,6 +44,8 @@ android {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime:2.11.2")
+    implementation("com.google.re2j:re2j:1.8")
     implementation("com.sun.mail:android-mail:1.6.8")
     implementation("com.sun.mail:android-activation:1.6.8")
     testImplementation("junit:junit:4.13.2")

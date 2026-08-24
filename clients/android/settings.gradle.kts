@@ -14,6 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Mate50ProSmsForwarder"
+rootProject.name = "Yanjian"
 include(":app")
-

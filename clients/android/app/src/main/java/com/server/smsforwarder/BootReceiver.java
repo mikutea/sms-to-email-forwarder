@@ -14,7 +14,10 @@ public final class BootReceiver extends BroadcastReceiver {
         }
         AppConfig config = AppConfig.load(context);
         if (config.enabled && QueueDatabase.get(context).count() > 0) {
-            ForwardScheduler.schedule(context);
+            ForwardScheduler.scheduleFromQueue(context);
+        }
+        if (TravelGuard.isEnabled(context)) {
+            TravelGuard.scheduleHeartbeat(context);
         }
     }
 }

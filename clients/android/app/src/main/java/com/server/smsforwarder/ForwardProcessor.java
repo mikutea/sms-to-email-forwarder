@@ -1,0 +1,158 @@
+package com.server.smsforwarder;
+
+import android.content.Context;
+
+import java.util.List;
+
+import javax.mail.AuthenticationFailedException;
+import javax.mail.MessagingException;
+
+final class ForwardProcessor {
+    private static final long MAX_RETRY_MS = 6L * 60L * 60L * 1000L;
+
+    private ForwardProcessor() {
+    }
+
+    static ProcessResult processReady(Context context, int limit) {
+        AppConfig config = AppConfig.load(context);
+        if (!config.enabled) {
+            // Keep queued data intact, but do not create an immediate WorkManager loop
+            // while the owner has deliberately paused forwarding.
+            return new ProcessResult(0, false);
+        }
+        String validationError = config.validateForForwarding();
+        if (validationError != null) {
+            AppConfig.setStatus(context, "配置无效，发送已暂停：" + validationError);
+            // Saving a valid configuration or enabling forwarding schedules the queue again.
+            return new ProcessResult(0, false);
+        }
+
+        QueueDatabase database = QueueDatabase.get(context);
+        List<QueueItem> ready = database.claimReady(System.currentTimeMillis(), limit);
+        int processed = 0;
+        for (QueueItem item : ready) {
+            try {
+                dispatch(database, config, item);
+                database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
+                database.remove(item.id);
+                processed++;
+                if (QueueItem.KIND_SMS.equals(item.kind)) {
+                    AppConfig.setSmsForwarded(context);
+                }
+                AppConfig.setSuccess(
+                        context,
+                        QueueItem.KIND_TEST.equals(item.kind)
+                                ? "SMTP 测试邮件已发送"
+                                : "短信已被 SMTP 服务器接受");
+            } catch (MessagingException | RuntimeException error) {
+                int attempts = Math.min(item.attempts + 1, 1000);
+                boolean authenticationFailure = error instanceof AuthenticationFailedException;
+                String classified = classifyError(error, authenticationFailure);
+                database.markRetry(
+                        item.id,
+                        attempts,
+                        System.currentTimeMillis() + retryDelay(attempts, authenticationFailure),
+                        classified);
+                AppConfig.setStatus(
+                        context,
+                        classified + "，已保留在加密队列中重试");
+            }
+        }
+        return new ProcessResult(processed, database.count() > 0);
+    }
+
+    private static void dispatch(QueueDatabase database, AppConfig config, QueueItem item)
+            throws MessagingException {
+        final int primaryBit = 1;
+        final int backupBit = 2;
+        int deliveredMask = item.deliveredMask;
+        MessagingException primaryError = null;
+
+        if ((deliveredMask & primaryBit) == 0) {
+            try {
+                SmtpMailer.send(config.primaryProfile(), item);
+                deliveredMask |= primaryBit;
+                database.markDelivered(item.id, deliveredMask);
+            } catch (MessagingException error) {
+                primaryError = error;
+            }
+        }
+
+        if (AppConfig.STRATEGY_PRIMARY_ONLY.equals(config.dispatchStrategy)
+                || !config.backupEnabled) {
+            if ((deliveredMask & primaryBit) != 0) {
+                return;
+            }
+            throw primaryError == null ? new MessagingException("主 SMTP 通道发送失败") : primaryError;
+        }
+
+        if (AppConfig.STRATEGY_FAILOVER.equals(config.dispatchStrategy)) {
+            if ((deliveredMask & primaryBit) != 0) {
+                return;
+            }
+            if ((deliveredMask & backupBit) != 0) {
+                return;
+            }
+            try {
+                SmtpMailer.send(config.backupProfile(), item);
+                database.markDelivered(item.id, deliveredMask | backupBit);
+                return;
+            } catch (MessagingException backupError) {
+                if (primaryError != null) {
+                    backupError.setNextException(primaryError);
+                }
+                throw backupError;
+            }
+        }
+
+        if ((deliveredMask & backupBit) == 0) {
+            try {
+                SmtpMailer.send(config.backupProfile(), item);
+                deliveredMask |= backupBit;
+                database.markDelivered(item.id, deliveredMask);
+            } catch (MessagingException backupError) {
+                if (primaryError != null) {
+                    backupError.setNextException(primaryError);
+                }
+                throw backupError;
+            }
+        }
+        if ((deliveredMask & primaryBit) == 0) {
+            throw primaryError == null ? new MessagingException("主 SMTP 通道发送失败") : primaryError;
+        }
+    }
+
+    static long retryDelay(int attempts, boolean authenticationFailure) {
+        if (authenticationFailure) {
+            return MAX_RETRY_MS;
+        }
+        int shift = Math.min(Math.max(attempts - 1, 0), 10);
+        return Math.min(MAX_RETRY_MS, 30_000L * (1L << shift));
+    }
+
+    private static String classifyError(Throwable error, boolean authenticationFailure) {
+        if (authenticationFailure) {
+            return "SMTP 认证失败，请检查授权码和服务开关";
+        }
+        return "SMTP 发送失败：" + safeMessage(error);
+    }
+
+    static String safeMessage(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return error.getClass().getSimpleName();
+        }
+        message = message.replace('\r', ' ').replace('\n', ' ');
+        return message.length() > 160 ? message.substring(0, 160) : message;
+    }
+
+    static final class ProcessResult {
+        final int processed;
+        final boolean hasPending;
+
+        ProcessResult(int processed, boolean hasPending) {
+            this.processed = processed;
+            this.hasPending = hasPending;
+        }
+    }
+}

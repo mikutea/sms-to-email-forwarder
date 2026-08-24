@@ -29,3 +29,6 @@ Linux CI 使用对应的 `./gradlew` 命令。
 - 没有完成目标手机的锁屏、断网恢复和真实短信测试前，不标记稳定版本。
 - SMTP 测试成功只证明邮件出口可用，不证明系统会在后台持续交付短信广播。
 
+## 版本状态
+
+`v0.2.0-beta.1` 已通过本地 JVM 单元测试、Android Lint、Debug 和 Release APK 构建。合并前 GitHub Actions 必须在 Pull Request 的准确 HEAD 上重复执行同一组检查。目标手机验收完成前不创建稳定版标签或公开签名 Release。

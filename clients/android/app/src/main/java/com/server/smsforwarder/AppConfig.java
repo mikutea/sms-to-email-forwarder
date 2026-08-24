@@ -2,11 +2,13 @@ package com.server.smsforwarder;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Patterns;
 
 final class AppConfig {
     static final String SECURITY_SSL_TLS = "SSL_TLS";
     static final String SECURITY_STARTTLS = "STARTTLS";
+    static final String STRATEGY_PRIMARY_ONLY = "PRIMARY_ONLY";
+    static final String STRATEGY_FAILOVER = "FAILOVER";
+    static final String STRATEGY_ALL = "ALL";
 
     private static final String PREFS = "sms_forwarder_config";
     private static final String KEY_SMTP_HOST = "smtp_host";
@@ -16,6 +18,15 @@ final class AppConfig {
     private static final String KEY_SMTP_PASSWORD = "smtp_password_encrypted";
     private static final String KEY_FROM_ADDRESS = "from_address";
     private static final String KEY_RECIPIENT = "recipient";
+    private static final String KEY_BACKUP_ENABLED = "backup_enabled";
+    private static final String KEY_BACKUP_SMTP_HOST = "backup_smtp_host";
+    private static final String KEY_BACKUP_SMTP_PORT = "backup_smtp_port";
+    private static final String KEY_BACKUP_SMTP_SECURITY = "backup_smtp_security";
+    private static final String KEY_BACKUP_SMTP_USERNAME = "backup_smtp_username";
+    private static final String KEY_BACKUP_SMTP_PASSWORD = "backup_smtp_password_encrypted";
+    private static final String KEY_BACKUP_FROM_ADDRESS = "backup_from_address";
+    private static final String KEY_BACKUP_RECIPIENT = "backup_recipient";
+    private static final String KEY_DISPATCH_STRATEGY = "dispatch_strategy";
     private static final String KEY_ALLOWLIST = "sender_allowlist";
     private static final String KEY_SKIP_OTP = "skip_otp";
     private static final String KEY_CONSENT = "privacy_consent";
@@ -23,6 +34,8 @@ final class AppConfig {
     private static final String KEY_LAST_STATUS = "last_status";
     private static final String KEY_LAST_STATUS_AT = "last_status_at";
     private static final String KEY_LAST_SUCCESS_AT = "last_success_at";
+    private static final String KEY_LAST_SMS_RECEIVED_AT = "last_sms_received_at";
+    private static final String KEY_LAST_SMS_FORWARDED_AT = "last_sms_forwarded_at";
 
     final String smtpHost;
     final int smtpPort;
@@ -31,6 +44,15 @@ final class AppConfig {
     final String smtpPassword;
     final String fromAddress;
     final String recipient;
+    final boolean backupEnabled;
+    final String backupSmtpHost;
+    final int backupSmtpPort;
+    final String backupSmtpSecurity;
+    final String backupSmtpUsername;
+    final String backupSmtpPassword;
+    final String backupFromAddress;
+    final String backupRecipient;
+    final String dispatchStrategy;
     final String senderAllowlist;
     final boolean skipOtp;
     final boolean privacyConsent;
@@ -44,6 +66,15 @@ final class AppConfig {
             String smtpPassword,
             String fromAddress,
             String recipient,
+            boolean backupEnabled,
+            String backupSmtpHost,
+            int backupSmtpPort,
+            String backupSmtpSecurity,
+            String backupSmtpUsername,
+            String backupSmtpPassword,
+            String backupFromAddress,
+            String backupRecipient,
+            String dispatchStrategy,
             String senderAllowlist,
             boolean skipOtp,
             boolean privacyConsent,
@@ -55,6 +86,15 @@ final class AppConfig {
         this.smtpPassword = smtpPassword;
         this.fromAddress = fromAddress;
         this.recipient = recipient;
+        this.backupEnabled = backupEnabled;
+        this.backupSmtpHost = backupSmtpHost;
+        this.backupSmtpPort = backupSmtpPort;
+        this.backupSmtpSecurity = backupSmtpSecurity;
+        this.backupSmtpUsername = backupSmtpUsername;
+        this.backupSmtpPassword = backupSmtpPassword;
+        this.backupFromAddress = backupFromAddress;
+        this.backupRecipient = backupRecipient;
+        this.dispatchStrategy = dispatchStrategy;
         this.senderAllowlist = senderAllowlist;
         this.skipOtp = skipOtp;
         this.privacyConsent = privacyConsent;
@@ -64,8 +104,10 @@ final class AppConfig {
     static AppConfig load(Context context) {
         SharedPreferences prefs = prefs(context);
         String password = "";
+        String backupPassword = "";
         try {
             password = CryptoStore.decrypt(prefs.getString(KEY_SMTP_PASSWORD, ""));
+            backupPassword = CryptoStore.decrypt(prefs.getString(KEY_BACKUP_SMTP_PASSWORD, ""));
         } catch (IllegalStateException e) {
             setStatus(context, "SMTP 授权码无法解密，请重新配置");
         }
@@ -77,6 +119,15 @@ final class AppConfig {
                 password,
                 prefs.getString(KEY_FROM_ADDRESS, ""),
                 prefs.getString(KEY_RECIPIENT, ""),
+                prefs.getBoolean(KEY_BACKUP_ENABLED, false),
+                prefs.getString(KEY_BACKUP_SMTP_HOST, ""),
+                prefs.getInt(KEY_BACKUP_SMTP_PORT, 465),
+                prefs.getString(KEY_BACKUP_SMTP_SECURITY, SECURITY_SSL_TLS),
+                prefs.getString(KEY_BACKUP_SMTP_USERNAME, ""),
+                backupPassword,
+                prefs.getString(KEY_BACKUP_FROM_ADDRESS, ""),
+                prefs.getString(KEY_BACKUP_RECIPIENT, ""),
+                normalizeStrategy(prefs.getString(KEY_DISPATCH_STRATEGY, STRATEGY_FAILOVER)),
                 prefs.getString(KEY_ALLOWLIST, ""),
                 prefs.getBoolean(KEY_SKIP_OTP, true),
                 prefs.getBoolean(KEY_CONSENT, false),
@@ -96,6 +147,52 @@ final class AppConfig {
             boolean skipOtp,
             boolean privacyConsent,
             boolean enabled) {
+        save(
+                context,
+                smtpHost,
+                smtpPort,
+                smtpSecurity,
+                smtpUsername,
+                smtpPassword,
+                fromAddress,
+                recipient,
+                false,
+                "",
+                465,
+                SECURITY_SSL_TLS,
+                "",
+                "",
+                "",
+                "",
+                STRATEGY_FAILOVER,
+                senderAllowlist,
+                skipOtp,
+                privacyConsent,
+                enabled);
+    }
+
+    static void save(
+            Context context,
+            String smtpHost,
+            int smtpPort,
+            String smtpSecurity,
+            String smtpUsername,
+            String smtpPassword,
+            String fromAddress,
+            String recipient,
+            boolean backupEnabled,
+            String backupSmtpHost,
+            int backupSmtpPort,
+            String backupSmtpSecurity,
+            String backupSmtpUsername,
+            String backupSmtpPassword,
+            String backupFromAddress,
+            String backupRecipient,
+            String dispatchStrategy,
+            String senderAllowlist,
+            boolean skipOtp,
+            boolean privacyConsent,
+            boolean enabled) {
         prefs(context).edit()
                 .putString(KEY_SMTP_HOST, smtpHost.trim())
                 .putInt(KEY_SMTP_PORT, smtpPort)
@@ -104,6 +201,15 @@ final class AppConfig {
                 .putString(KEY_SMTP_PASSWORD, CryptoStore.encrypt(smtpPassword))
                 .putString(KEY_FROM_ADDRESS, fromAddress.trim())
                 .putString(KEY_RECIPIENT, recipient.trim())
+                .putBoolean(KEY_BACKUP_ENABLED, backupEnabled)
+                .putString(KEY_BACKUP_SMTP_HOST, backupSmtpHost.trim())
+                .putInt(KEY_BACKUP_SMTP_PORT, backupSmtpPort)
+                .putString(KEY_BACKUP_SMTP_SECURITY, backupSmtpSecurity)
+                .putString(KEY_BACKUP_SMTP_USERNAME, backupSmtpUsername.trim())
+                .putString(KEY_BACKUP_SMTP_PASSWORD, CryptoStore.encrypt(backupSmtpPassword))
+                .putString(KEY_BACKUP_FROM_ADDRESS, backupFromAddress.trim())
+                .putString(KEY_BACKUP_RECIPIENT, backupRecipient.trim())
+                .putString(KEY_DISPATCH_STRATEGY, normalizeStrategy(dispatchStrategy))
                 .putString(KEY_ALLOWLIST, senderAllowlist.trim())
                 .putBoolean(KEY_SKIP_OTP, skipOtp)
                 .putBoolean(KEY_CONSENT, privacyConsent)
@@ -111,47 +217,51 @@ final class AppConfig {
                 .apply();
     }
 
-    static String validate(
-            String smtpHost,
-            String smtpPortText,
-            String smtpSecurity,
-            String smtpUsername,
-            String smtpPassword,
-            String fromAddress,
-            String recipient,
-            boolean privacyConsent) {
+    SmtpProfile primaryProfile() {
+        return new SmtpProfile(
+                "主通道",
+                smtpHost,
+                smtpPort,
+                smtpSecurity,
+                smtpUsername,
+                smtpPassword,
+                fromAddress,
+                recipient);
+    }
+
+    SmtpProfile backupProfile() {
+        return new SmtpProfile(
+                "备用通道",
+                backupSmtpHost,
+                backupSmtpPort,
+                backupSmtpSecurity,
+                backupSmtpUsername,
+                backupSmtpPassword,
+                backupFromAddress,
+                backupRecipient);
+    }
+
+    String validateForForwarding() {
         if (!privacyConsent) {
             return "请先确认短信隐私转发风险";
         }
-        String host = smtpHost.trim();
-        if (host.isEmpty() || host.length() > 253 || host.matches(".*\\s.*") || host.contains("://")) {
-            return "SMTP 主机格式不正确，只填写主机名或 IP";
+        String primaryError = primaryProfile().validate();
+        if (primaryError != null) {
+            return primaryError;
         }
-        int port;
-        try {
-            port = Integer.parseInt(smtpPortText.trim());
-        } catch (NumberFormatException e) {
-            return "SMTP 端口必须是数字";
-        }
-        if (port < 1 || port > 65535) {
-            return "SMTP 端口范围应为 1–65535";
-        }
-        if (!SECURITY_SSL_TLS.equals(smtpSecurity) && !SECURITY_STARTTLS.equals(smtpSecurity)) {
-            return "必须选择 SSL/TLS 或 STARTTLS";
-        }
-        if (smtpUsername.trim().isEmpty()) {
-            return "请填写 SMTP 用户名";
-        }
-        if (smtpPassword.isEmpty()) {
-            return "请填写 SMTP 授权码或应用专用密码";
-        }
-        if (!Patterns.EMAIL_ADDRESS.matcher(fromAddress.trim()).matches()) {
-            return "发件邮箱格式不正确";
-        }
-        if (!Patterns.EMAIL_ADDRESS.matcher(recipient.trim()).matches()) {
-            return "收件邮箱格式不正确";
+        if (backupEnabled) {
+            return backupProfile().validate();
         }
         return null;
+    }
+
+    private static String normalizeStrategy(String strategy) {
+        if (STRATEGY_PRIMARY_ONLY.equals(strategy)
+                || STRATEGY_FAILOVER.equals(strategy)
+                || STRATEGY_ALL.equals(strategy)) {
+            return strategy;
+        }
+        return STRATEGY_FAILOVER;
     }
 
     static void setStatus(Context context, String status) {
@@ -183,6 +293,26 @@ final class AppConfig {
         return status + "\n" + new java.text.SimpleDateFormat(
                 "yyyy-MM-dd HH:mm:ss",
                 java.util.Locale.getDefault()).format(new java.util.Date(at));
+    }
+
+    static long getLastSuccessAt(Context context) {
+        return prefs(context).getLong(KEY_LAST_SUCCESS_AT, 0L);
+    }
+
+    static void setSmsReceived(Context context, long receivedAt) {
+        prefs(context).edit().putLong(KEY_LAST_SMS_RECEIVED_AT, receivedAt).apply();
+    }
+
+    static void setSmsForwarded(Context context) {
+        prefs(context).edit().putLong(KEY_LAST_SMS_FORWARDED_AT, System.currentTimeMillis()).apply();
+    }
+
+    static long getLastSmsReceivedAt(Context context) {
+        return prefs(context).getLong(KEY_LAST_SMS_RECEIVED_AT, 0L);
+    }
+
+    static long getLastSmsForwardedAt(Context context) {
+        return prefs(context).getLong(KEY_LAST_SMS_FORWARDED_AT, 0L);
     }
 
     private static SharedPreferences prefs(Context context) {

@@ -20,16 +20,20 @@ final class SmtpMailer {
     }
 
     static void send(AppConfig config, QueueItem item) throws MessagingException {
+        send(config.primaryProfile(), item);
+    }
+
+    static void send(SmtpProfile profile, QueueItem item) throws MessagingException {
         Properties properties = new Properties();
-        properties.put("mail.smtp.host", config.smtpHost);
-        properties.put("mail.smtp.port", Integer.toString(config.smtpPort));
+        properties.put("mail.smtp.host", profile.host);
+        properties.put("mail.smtp.port", Integer.toString(profile.port));
         properties.put("mail.smtp.auth", "true");
-        properties.put("mail.smtp.connectiontimeout", "15000");
-        properties.put("mail.smtp.timeout", "20000");
-        properties.put("mail.smtp.writetimeout", "20000");
+        properties.put("mail.smtp.connectiontimeout", "6000");
+        properties.put("mail.smtp.timeout", "8000");
+        properties.put("mail.smtp.writetimeout", "8000");
         properties.put("mail.smtp.ssl.checkserveridentity", "true");
 
-        if (AppConfig.SECURITY_SSL_TLS.equals(config.smtpSecurity)) {
+        if (AppConfig.SECURITY_SSL_TLS.equals(profile.security)) {
             properties.put("mail.smtp.ssl.enable", "true");
         } else {
             properties.put("mail.smtp.starttls.enable", "true");
@@ -39,14 +43,16 @@ final class SmtpMailer {
         Session session = Session.getInstance(properties, new Authenticator() {
             @Override
             protected PasswordAuthentication getPasswordAuthentication() {
-                return new PasswordAuthentication(config.smtpUsername, config.smtpPassword);
+                return new PasswordAuthentication(profile.username, profile.password);
             }
         });
         session.setDebug(false);
 
         MimeMessage message = new StableIdMimeMessage(session, item.id);
-        message.setFrom(new InternetAddress(config.fromAddress));
-        message.setRecipient(Message.RecipientType.TO, new InternetAddress(config.recipient));
+        message.setFrom(new InternetAddress(profile.fromAddress));
+        for (String recipient : profile.recipients()) {
+            message.addRecipient(Message.RecipientType.TO, new InternetAddress(recipient));
+        }
         message.setSentDate(new Date());
         message.setSubject(subject(item), StandardCharsets.UTF_8.name());
         message.setText(body(item), StandardCharsets.UTF_8.name());
@@ -59,17 +65,29 @@ final class SmtpMailer {
         if (QueueItem.KIND_TEST.equals(item.kind)) {
             return "[短信转邮箱] SMTP 测试成功";
         }
-        String sender = item.sender.replace('\r', ' ').replace('\n', ' ').trim();
+        if (QueueItem.KIND_HEARTBEAT.equals(item.kind)) {
+            return "[雁笺] 旅行守护心跳正常";
+        }
+        if (QueueItem.KIND_ALERT.equals(item.kind)) {
+            return "[雁笺提醒] " + safeSubject(item.sender);
+        }
+        return "[新短信] " + safeSubject(item.sender);
+    }
+
+    private static String safeSubject(String value) {
+        String sender = value.replace('\r', ' ').replace('\n', ' ').trim();
         if (sender.length() > 40) {
             sender = sender.substring(0, 40);
         }
-        return "[新短信] " + sender;
+        return sender;
     }
 
     private static String body(QueueItem item) {
         String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.getDefault())
                 .format(new Date(item.receivedAt));
-        if (QueueItem.KIND_TEST.equals(item.kind)) {
+        if (QueueItem.KIND_TEST.equals(item.kind)
+                || QueueItem.KIND_HEARTBEAT.equals(item.kind)
+                || QueueItem.KIND_ALERT.equals(item.kind)) {
             return item.body + "\n\n发送时间：" + time;
         }
         String sim = item.simSlot >= 0 ? "SIM " + (item.simSlot + 1) : "未知";
@@ -94,4 +112,3 @@ final class SmtpMailer {
         }
     }
 }
-

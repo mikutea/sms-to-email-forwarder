@@ -4,7 +4,6 @@ import android.content.Context;
 
 import java.util.List;
 
-import javax.mail.AuthenticationFailedException;
 import javax.mail.MessagingException;
 
 final class ForwardProcessor {
@@ -46,8 +45,9 @@ final class ForwardProcessor {
                                 : "短信已被 SMTP 服务器接受");
             } catch (MessagingException | RuntimeException error) {
                 int attempts = Math.min(item.attempts + 1, 1000);
-                boolean authenticationFailure = error instanceof AuthenticationFailedException;
-                String classified = SmtpFailure.describe(error);
+                boolean authenticationFailure = SmtpFailure.isAuthenticationFailure(error);
+                String classified = SmtpFailure.describeForRecord(error)
+                        + " · " + NetworkState.diagnosticSummary(context);
                 database.markRetry(
                         item.id,
                         attempts,

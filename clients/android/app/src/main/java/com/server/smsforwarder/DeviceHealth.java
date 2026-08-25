@@ -5,8 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.net.ConnectivityManager;
-import android.net.NetworkCapabilities;
 import android.os.BatteryManager;
 import android.os.PowerManager;
 
@@ -30,6 +28,7 @@ final class DeviceHealth {
     final long lastSmsReceivedAt;
     final long lastSmsForwardedAt;
     final String networkLabel;
+    final boolean backgroundDataRestricted;
 
     private DeviceHealth(
             boolean smsPermission,
@@ -44,7 +43,8 @@ final class DeviceHealth {
             long lastSuccessAt,
             long lastSmsReceivedAt,
             long lastSmsForwardedAt,
-            String networkLabel) {
+            String networkLabel,
+            boolean backgroundDataRestricted) {
         this.smsPermission = smsPermission;
         this.forwardingEnabled = forwardingEnabled;
         this.smtpValid = smtpValid;
@@ -58,12 +58,13 @@ final class DeviceHealth {
         this.lastSmsReceivedAt = lastSmsReceivedAt;
         this.lastSmsForwardedAt = lastSmsForwardedAt;
         this.networkLabel = networkLabel;
+        this.backgroundDataRestricted = backgroundDataRestricted;
     }
 
     static DeviceHealth inspect(Context context) {
         AppConfig config = AppConfig.load(context);
         BatterySnapshot battery = readBattery(context);
-        String network = networkLabel(context);
+        NetworkState.Snapshot network = NetworkState.inspect(context);
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         boolean exempt = powerManager != null
                 && powerManager.isIgnoringBatteryOptimizations(context.getPackageName());
@@ -72,7 +73,7 @@ final class DeviceHealth {
                         == PackageManager.PERMISSION_GRANTED,
                 config.enabled,
                 config.validateForForwarding() == null,
-                NetworkState.isConnected(context),
+                network.usableForBackground,
                 exempt,
                 TravelGuard.isBackgroundConfirmed(context),
                 battery.percent,
@@ -81,7 +82,8 @@ final class DeviceHealth {
                 AppConfig.getLastSuccessAt(context),
                 AppConfig.getLastSmsReceivedAt(context),
                 AppConfig.getLastSmsForwardedAt(context),
-                network);
+                network.label,
+                network.backgroundRestricted);
     }
 
     boolean readyForTravel() {
@@ -119,29 +121,6 @@ final class DeviceHealth {
                 + "\n待发送：" + pendingCount + " 条"
                 + "\n最近 SMTP 成功：" + lastSuccess
                 + "\n真实短信闭环：" + realSms;
-    }
-
-    private static String networkLabel(Context context) {
-        ConnectivityManager manager =
-                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (manager == null || manager.getActiveNetwork() == null) {
-            return "离线";
-        }
-        NetworkCapabilities capabilities = manager.getNetworkCapabilities(manager.getActiveNetwork());
-        if (capabilities == null) {
-            return "离线";
-        }
-        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            return "Wi-Fi 已连接";
-        }
-        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-            return "移动网络已连接";
-        }
-        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
-            return "有线网络已连接";
-        }
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                ? "网络已连接" : "离线";
     }
 
     private static BatterySnapshot readBattery(Context context) {

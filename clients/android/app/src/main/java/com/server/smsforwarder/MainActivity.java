@@ -1668,9 +1668,13 @@ public final class MainActivity extends Activity {
     private void openAppSettings() {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         intent.setData(Uri.parse("package:" + getPackageName()));
-        if (openResolvedIntent(intent, null)) return;
-        if (openResolvedIntent(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS), null)) return;
-        openResolvedIntent(new Intent(Settings.ACTION_SETTINGS), "系统没有可用的应用设置入口");
+        if (openIntentSafely(intent, null)) return;
+        if (openIntentSafely(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS), null)) return;
+        if (openIntentSafely(new Intent(Settings.ACTION_SETTINGS), null)) return;
+        showGlassDialog(
+                "无法打开系统设置",
+                "当前系统没有向第三方 App 提供可用的设置入口。请手动打开“设置”，搜索“雁笺”进入应用详情。",
+                "知道了", null, null);
     }
 
     private void requestSmsPermission(boolean enableForwarding) {
@@ -1693,9 +1697,9 @@ public final class MainActivity extends Activity {
         }
         Intent direct = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                 Uri.parse("package:" + getPackageName()));
-        if (openResolvedIntent(direct, null)) return;
+        if (openIntentSafely(direct, null)) return;
         Intent list = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
-        if (openResolvedIntent(list, null)) return;
+        if (openIntentSafely(list, null)) return;
         openAppSettings();
     }
 
@@ -1781,7 +1785,7 @@ public final class MainActivity extends Activity {
                 notes + "\n\n将打开项目官方 GitHub Release。正式版与后续 Beta 使用同一签名后，可覆盖安装并保留本机配置。",
                 "查看" + (release.prerelease ? " Beta" : "正式发布"),
                 () -> {
-                    openResolvedIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl)),
+                    openIntentSafely(new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl)),
                             "无法打开浏览器，请稍后重试");
                 },
                 "稍后");
@@ -1844,26 +1848,43 @@ public final class MainActivity extends Activity {
                 new Intent().setComponent(new ComponentName(
                         "com.huawei.systemmanager",
                         "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")),
-                new Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER").setPackage("com.huawei.systemmanager"),
-                new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        .setData(Uri.parse("package:" + getPackageName()))
+                new Intent().setComponent(new ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity")),
+                new Intent().setComponent(new ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.optimize.process.ProtectActivity"))
         };
         for (Intent candidate : candidates) {
-            if (openResolvedIntent(candidate, null)) {
+            if (openIntentSafely(candidate, null)) {
                 showToast("请在系统页允许雁笺自启动、关联启动和后台活动，返回后再确认");
                 return;
             }
         }
-        openResolvedIntent(new Intent(Settings.ACTION_SETTINGS),
-                "系统未提供可用入口，请搜索“应用启动管理”并选择雁笺");
+
+        // Huawei does not publish a stable third-party Intent for this page.
+        // On versions that hide or rename the internal activity, application
+        // details is the only portable per-app destination. Start it directly:
+        // startActivity() is not subject to the package-visibility query result.
+        Intent appDetails = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:" + getPackageName()));
+        if (openIntentSafely(appDetails, null)) {
+            showToast("已打开雁笺应用详情，请进入“耗电详情/应用启动管理”允许后台启动");
+            return;
+        }
+        if (openIntentSafely(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS), null)
+                || openIntentSafely(new Intent(Settings.ACTION_SETTINGS), null)) {
+            showToast("请在设置中搜索“应用启动管理”，然后选择雁笺");
+            return;
+        }
+        showGlassDialog(
+                "无法打开系统设置",
+                "鸿蒙没有向当前 App 暴露可用的设置页面。请手动打开“设置 → 应用和服务 → 应用启动管理 → 雁笺”。",
+                "知道了", null, null);
     }
 
-    private boolean openResolvedIntent(Intent intent, String failureMessage) {
+    private boolean openIntentSafely(Intent intent, String failureMessage) {
         try {
-            if (intent.resolveActivity(getPackageManager()) == null) {
-                if (failureMessage != null) showToast(failureMessage);
-                return false;
-            }
             startActivity(intent);
             return true;
         } catch (ActivityNotFoundException | SecurityException error) {

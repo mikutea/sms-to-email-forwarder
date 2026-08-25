@@ -7,8 +7,6 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -396,17 +394,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     static String stableSmsId(String sender, String body, long receivedAt, int simSlot) {
-        String input = receivedAt + "\n" + simSlot + "\n" + sender + "\n" + body;
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder(digest.length * 2);
-            for (byte value : digest) {
-                result.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
-            }
-            return result.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
+        String safeSender = sender == null ? "" : sender;
+        String safeBody = body == null ? "" : body;
+        String input = "yanjian-sms-dedup-v1\n"
+                + receivedAt + "\n" + simSlot + "\n"
+                + safeSender.length() + ":" + safeSender
+                + safeBody.length() + ":" + safeBody;
+        byte[] digest = CryptoStore.hmac(input.getBytes(StandardCharsets.UTF_8));
+        StringBuilder result = new StringBuilder(digest.length * 2);
+        for (byte value : digest) {
+            result.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
         }
+        return result.toString();
     }
 }

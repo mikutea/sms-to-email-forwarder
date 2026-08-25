@@ -3,7 +3,9 @@ package com.server.smsforwarder;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ContentResolver;
 import android.content.pm.PackageManager;
@@ -11,6 +13,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
@@ -104,7 +107,6 @@ public final class MainActivity extends Activity {
     private ScrollView pageScroll;
     private int currentPage;
     private boolean enableAfterPermission;
-    private boolean updateDialogShowing;
     private boolean visualTestMode;
     private boolean firstResume = true;
     private int historyFilter;
@@ -222,14 +224,18 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean granted = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+        int returnPage = enableAfterPermission ? PAGE_GUARDIAN : currentPage;
         if (granted && enableAfterPermission) {
             AppConfig.setEnabled(this, true);
             AppConfig.setStatus(this, "自动转发已启用，等待新短信");
         } else if (!granted) {
-            showToast("未获得短信权限，自动转发没有启用");
+            showGlassDialog(
+                    "短信权限尚未允许",
+                    "雁笺只在新短信到达时读取系统广播，不会读取历史短信。你可以再次授权，或在系统应用详情中手动允许。",
+                    "打开权限设置", this::openAppSettings, "稍后再说");
         }
         enableAfterPermission = false;
-        showPage(PAGE_GUARDIAN);
+        showPage(returnPage);
     }
 
     @Override
@@ -480,14 +486,21 @@ public final class MainActivity extends Activity {
         TextView guardText = text("旅行守护", 16f, COLOR_INK, false);
         guardText.setPadding(dp(12), 0, 0, 0);
         guardRow.addView(guardText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView guardState = text(displayGuardEnabled ? "已开启" : "未开启", 13f,
-                displayGuardEnabled ? COLOR_JADE_DARK : COLOR_MUTED, true);
+        boolean guardDegraded = displayGuardEnabled && !displayReady;
+        TextView guardState = text(guardDegraded ? "需处理" : displayGuardEnabled ? "已开启" : "未开启", 13f,
+                guardDegraded ? COLOR_CINNABAR : displayGuardEnabled ? COLOR_JADE_DARK : COLOR_MUTED, true);
         guardRow.addView(guardState);
         Switch guardSwitch = new Switch(this);
         guardSwitch.setChecked(displayGuardEnabled);
         guardSwitch.setContentDescription("旅行守护开关");
         guardSwitch.setButtonTintList(ColorStateList.valueOf(COLOR_JADE));
-        guardSwitch.setOnCheckedChangeListener((button, checked) -> toggleTravelGuard());
+        guardSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (checked == TravelGuard.isEnabled(this)) return;
+            toggleTravelGuard();
+            // A blocked enable attempt must never leave the visual switch in an
+            // enabled state while the persisted guard is still disabled.
+            if (checked && !TravelGuard.isEnabled(this)) button.setChecked(false);
+        });
         guardRow.addView(guardSwitch, new LinearLayout.LayoutParams(dp(56), dp(42)));
         page.addView(guardRow, cardParams());
 
@@ -578,6 +591,7 @@ public final class MainActivity extends Activity {
         primaryRecipients = input(primary, "收件邮箱，可用逗号或换行填写多个", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         primaryRecipients.setMinLines(1);
         fillProfile(config.primaryProfile(), primaryHost, primaryPort, primarySecurity, primaryUsername, primaryPassword, primaryFrom, primaryRecipients);
+        bindSecurityPort(primarySecurity, primaryPort);
         if (visualTestMode && config.primaryProfile().validate() != null) {
             primaryHost.setText("smtp.qq.com");
             primaryPort.setText("465");
@@ -624,6 +638,7 @@ public final class MainActivity extends Activity {
         backupCard.addView(fieldLabel("收件邮箱"));
         backupRecipients = input(backupCard, "备用收件邮箱，可填写多个", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         fillProfile(config.backupProfile(), backupHost, backupPort, backupSecurity, backupUsername, backupPassword, backupFrom, backupRecipients);
+        bindSecurityPort(backupSecurity, backupPort);
         backupContent.addView(backupCard, cardParams());
 
         page.addView(primaryContent, matchWrap());
@@ -909,14 +924,13 @@ public final class MainActivity extends Activity {
         clear.setTextColor(COLOR_CINNABAR);
         clear.setCompoundDrawablesWithIntrinsicBounds(icon(MaterialIcons.md_delete, COLOR_CINNABAR, 20), null, null, null);
         clear.setCompoundDrawablePadding(dp(7));
-        clear.setOnClickListener(view -> new AlertDialog.Builder(this)
-                .setTitle("清空历史记录？")
-                .setMessage("不会删除仍在待发队列中的短信。历史记录删除后无法恢复。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("确认清空", (dialog, which) -> {
+        clear.setOnClickListener(view -> showGlassDialog(
+                "清空历史记录？",
+                "不会删除仍在待发队列中的短信。历史记录删除后无法恢复。",
+                "确认清空", () -> {
                     QueueDatabase.get(this).clearHistory();
                     showPage(PAGE_HISTORY);
-                }).show());
+                }, "取消"));
         page.addView(clear, matchWrap());
     }
 
@@ -949,7 +963,8 @@ public final class MainActivity extends Activity {
         LinearLayout guardian = groupedCard();
         guardian.addView(settingsRow(
                 "后台授权",
-                visualTestMode || (health.backgroundConfirmed && health.batteryExempt) ? "5 / 6 已完成" : "仍有项目待完成",
+                visualTestMode || (health.backgroundConfirmed && health.batteryExempt && health.smsPermission)
+                        ? "关键授权已完成" : "仍有项目待完成",
                 MaterialCommunityIcons.mdi_shield_outline,
                 () -> showPage(PAGE_SYSTEM_GUARDIAN)));
         guardian.addView(hairlineDivider());
@@ -998,10 +1013,10 @@ public final class MainActivity extends Activity {
         boolean smsAllowed = visualTestMode || health.smsPermission;
         boolean batteryAllowed = visualTestMode || health.batteryExempt;
         boolean backgroundAllowed = visualTestMode || health.backgroundConfirmed;
-        boolean lockNetwork = visualTestMode ? false : health.connected;
+        boolean lockNetwork = visualTestMode || health.connected;
         int completed = (smsAllowed ? 1 : 0)
                 + (batteryAllowed ? 1 : 0)
-                + (backgroundAllowed ? 3 : 0)
+                + (backgroundAllowed ? 1 : 0)
                 + (lockNetwork ? 1 : 0);
 
         LinearLayout progress = card();
@@ -1014,18 +1029,20 @@ public final class MainActivity extends Activity {
         shield.setImageDrawable(icon(MaterialIcons.md_verified_user, COLOR_JADE, 34));
         progressIcon.addView(shield, new LinearLayout.LayoutParams(dp(40), dp(40)));
         progressTop.addView(progressIcon, new LinearLayout.LayoutParams(dp(58), dp(58)));
-        TextView progressTitle = text("后台守护  " + completed + " / 6  已完成", 20f,
-                completed == 6 ? COLOR_JADE_DARK : COLOR_AMBER, true);
+        TextView progressTitle = text("后台守护  " + completed + " / 4  已完成", 20f,
+                completed == 4 ? COLOR_JADE_DARK : COLOR_AMBER, true);
         progressTitle.setPadding(dp(14), 0, 0, 0);
         progressTop.addView(progressTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         progress.addView(progressTop, matchWrap());
         LinearLayout progressTrack = new LinearLayout(this);
         progressTrack.setBackground(roundRect(Color.rgb(224, 231, 229), 4));
-        TextView progressLine = new TextView(this);
-        progressLine.setBackground(roundRect(COLOR_JADE, 4));
-        progressTrack.addView(progressLine, new LinearLayout.LayoutParams(0, dp(7), Math.max(1, completed)));
-        if (completed < 6) {
-            progressTrack.addView(new View(this), new LinearLayout.LayoutParams(0, dp(7), 6 - completed));
+        if (completed > 0) {
+            TextView progressLine = new TextView(this);
+            progressLine.setBackground(roundRect(COLOR_JADE, 4));
+            progressTrack.addView(progressLine, new LinearLayout.LayoutParams(0, dp(7), completed));
+        }
+        if (completed < 4) {
+            progressTrack.addView(new View(this), new LinearLayout.LayoutParams(0, dp(7), 4 - completed));
         }
         LinearLayout.LayoutParams progressParams = matchWrap();
         progressParams.height = dp(7);
@@ -1035,16 +1052,22 @@ public final class MainActivity extends Activity {
 
         LinearLayout guide = card();
         guide.addView(sectionHeader(MaterialIcons.md_security, "后台授权清单"));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_message_text_outline, "接收短信权限", smsAllowed ? "已允许" : "待允许", smsAllowed));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_battery_charging, "关闭电池优化", batteryAllowed ? "已完成" : "待完成", batteryAllowed));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_power, "允许自启动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_link, "允许关联启动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_pulse, "允许后台活动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
-        guide.addView(statusRow(MaterialCommunityIcons.mdi_lock_outline, "锁屏保持网络", lockNetwork ? "当前可用" : "待确认", lockNetwork));
+        guide.addView(actionStatusRow(MaterialCommunityIcons.mdi_message_text_outline,
+                "接收短信权限", smsAllowed ? "已允许" : "点按授权", smsAllowed,
+                () -> requestSmsPermission(false)));
+        guide.addView(actionStatusRow(MaterialCommunityIcons.mdi_battery_charging,
+                "忽略电池优化", batteryAllowed ? "已允许" : "点按授权", batteryAllowed,
+                this::requestBatteryExemption));
+        guide.addView(actionStatusRow(MaterialCommunityIcons.mdi_power,
+                "厂商后台启动", backgroundAllowed ? "已确认" : "点按设置", backgroundAllowed,
+                this::openHuaweiLaunchSettings));
+        guide.addView(actionStatusRow(MaterialCommunityIcons.mdi_lock_outline,
+                "当前网络", lockNetwork ? "可用" : "当前离线", lockNetwork,
+                () -> showGlassDialog("网络状态", "网络连接属于实时状态，不需要额外权限。离家前请完成一次锁屏真实短信试投。", "知道了", null, null)));
         page.addView(guide, cardParams());
 
-        Button continueGuide = actionButton("继续完成授权", COLOR_JADE);
-        continueGuide.setOnClickListener(view -> showPage(PAGE_ONBOARDING));
+        Button continueGuide = actionButton(completed == 4 ? "查看锁屏测试向导" : "继续完成授权", COLOR_JADE);
+        continueGuide.setOnClickListener(view -> runNextPermissionStep());
         page.addView(continueGuide, matchWrap());
         Button appSettings = secondaryButton("打开应用详情设置");
         appSettings.setOnClickListener(view -> openAppSettings());
@@ -1243,7 +1266,7 @@ public final class MainActivity extends Activity {
         onboardingTitle.setTypeface(Typeface.SERIF, Typeface.BOLD);
         onboardingTitle.setPadding(dp(8), 0, 0, 0);
         page.addView(onboardingTitle);
-        TextView onboardingSubtitle = text("完成后台授权，锁屏后也能持续转发", 14f, COLOR_MUTED, false);
+        TextView onboardingSubtitle = text("能直接授权的项目会弹出系统确认；厂商启动管理需在系统页确认", 14f, COLOR_MUTED, false);
         onboardingSubtitle.setPadding(dp(8), dp(4), 0, dp(14));
         page.addView(onboardingSubtitle);
         page.addView(new View(this), new LinearLayout.LayoutParams(
@@ -1265,16 +1288,24 @@ public final class MainActivity extends Activity {
         page.addView(new View(this), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(24)));
 
+        DeviceHealth health = DeviceHealth.inspect(this);
         LinearLayout permissions = card();
-        permissions.addView(permissionSwitchRow(MaterialIcons.md_power_settings_new, "允许自启动"));
+        permissions.addView(actionStatusRow(MaterialCommunityIcons.mdi_message_text_outline,
+                "接收短信", health.smsPermission ? "已允许" : "点按授权", health.smsPermission,
+                () -> requestSmsPermission(false)));
         permissions.addView(hairlineDivider());
-        permissions.addView(permissionSwitchRow(MaterialIcons.md_link, "允许关联启动"));
+        permissions.addView(actionStatusRow(MaterialCommunityIcons.mdi_battery_charging,
+                "忽略电池优化", health.batteryExempt ? "已允许" : "点按授权", health.batteryExempt,
+                this::requestBatteryExemption));
         permissions.addView(hairlineDivider());
-        permissions.addView(permissionSwitchRow(MaterialIcons.md_graphic_eq, "允许后台活动"));
+        permissions.addView(actionStatusRow(MaterialIcons.md_power_settings_new,
+                "自启动 · 关联启动 · 后台活动",
+                health.backgroundConfirmed ? "已确认" : "点按设置",
+                health.backgroundConfirmed, this::openHuaweiLaunchSettings));
         page.addView(permissions, cardParams());
 
-        Button launch = actionButton("打开雁笺的应用设置", COLOR_JADE);
-        launch.setOnClickListener(view -> openHuaweiLaunchSettings());
+        Button launch = actionButton("完成下一项授权", COLOR_JADE);
+        launch.setOnClickListener(view -> runNextPermissionStep());
         page.addView(launch, matchWrap());
         Button done = new Button(this);
         done.setText("我已完成");
@@ -1285,14 +1316,19 @@ public final class MainActivity extends Activity {
         done.setMinHeight(dp(42));
         MotionEffects.bindPress(done);
         done.setOnClickListener(view -> {
-            TravelGuard.setBackgroundConfirmed(this, true);
-            showToast("后台授权已由你确认，请继续完成锁屏试投");
-            showPage(PAGE_SYSTEM_GUARDIAN);
+            showGlassDialog(
+                    "确认厂商后台设置",
+                    "仅当你已在系统的“应用启动管理”中允许雁笺自启动、关联启动和后台活动时再确认。Android 不提供读取这些厂商开关的标准接口。",
+                    "我已在系统中完成",
+                    () -> {
+                        TravelGuard.setBackgroundConfirmed(this, true);
+                        showPage(PAGE_SYSTEM_GUARDIAN);
+                    },
+                    "返回检查");
         });
         page.addView(done, matchWrap());
         TextView delay = navigationRow("仍然延迟？", "检查休眠时网络连接", MaterialIcons.md_help_outline);
-        delay.setOnClickListener(view -> startActivity(
-                new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)));
+        delay.setOnClickListener(view -> requestBatteryExemption());
         page.addView(delay, cardParams());
         TextView next = text("下一步：锁屏试投", 14f, COLOR_INK, true);
         next.setGravity(Gravity.CENTER);
@@ -1360,8 +1396,29 @@ public final class MainActivity extends Activity {
                 "当前版本", BuildConfig.VERSION_NAME, MaterialIcons.md_info_outline, false);
         updates.addView(versionRow);
         updates.addView(hairlineDivider());
+        LinearLayout channelRow = new LinearLayout(this);
+        channelRow.setGravity(Gravity.CENTER_VERTICAL);
+        channelRow.setPadding(dp(8), dp(5), dp(2), dp(5));
+        channelRow.addView(text("更新通道", 13f, COLOR_INK, false),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Spinner updateChannel = createSpinner(new String[]{"稳定版（推荐）", "Beta 测试版"});
+        updateChannel.setSelection(UpdateChecker.CHANNEL_BETA.equals(UpdateChecker.channel(this)) ? 1 : 0);
+        updateChannel.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                UpdateChecker.setChannel(MainActivity.this,
+                        position == 1 ? UpdateChecker.CHANNEL_BETA : UpdateChecker.CHANNEL_STABLE);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        channelRow.addView(updateChannel, new LinearLayout.LayoutParams(dp(154), dp(42)));
+        updates.addView(channelRow);
+        updates.addView(hairlineDivider());
         Switch automaticUpdates = new Switch(this);
-        automaticUpdates.setText("每天最多检查一次稳定版本");
+        automaticUpdates.setText("每天最多自动检查一次所选通道");
         automaticUpdates.setTextColor(COLOR_INK);
         automaticUpdates.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f * TEXT_SCALE);
         automaticUpdates.setPadding(dp(8), dp(6), dp(2), dp(6));
@@ -1400,7 +1457,7 @@ public final class MainActivity extends Activity {
         }
         if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
             enableAfterPermission = true;
-            requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS}, REQUEST_RECEIVE_SMS);
+            requestSmsPermission(true);
             return;
         }
         AppConfig.setEnabled(this, true);
@@ -1420,11 +1477,13 @@ public final class MainActivity extends Activity {
         }
         DeviceHealth health = DeviceHealth.inspect(this);
         if (!health.readyForTravel()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("尚未满足离家条件")
-                    .setMessage(health.summary() + "\n\n请先补齐未完成项，再开启旅行守护。")
-                    .setPositiveButton("知道了", null)
-                    .show();
+            String blockers = "• " + TextUtils.join("\n• ", health.travelBlockers());
+            showGlassDialog(
+                    "旅行守护尚未就绪",
+                    "请先完成：\n" + blockers + "\n\n网络是实时状态，不会伪装成永久授权。完成后再开启守护。",
+                    "处理第一项",
+                    () -> openFirstTravelBlocker(health),
+                    "稍后再说");
             return;
         }
         TravelGuard.setEnabled(this, true);
@@ -1490,7 +1549,7 @@ public final class MainActivity extends Activity {
     }
 
     private void testProfile(SmtpProfile profile, String label) {
-        showToast("正在测试" + label + "…");
+        showToast("正在安全测试" + label + "…");
         executor.execute(() -> {
             String result;
             boolean success;
@@ -1507,7 +1566,7 @@ public final class MainActivity extends Activity {
                 result = label + "测试邮件已被 SMTP 服务器接受";
                 success = true;
             } catch (MessagingException | RuntimeException error) {
-                result = label + "测试失败：" + ForwardProcessor.safeMessage(error);
+                result = label + "测试失败：" + SmtpFailure.describe(error);
                 success = false;
             }
             if (success) {
@@ -1573,11 +1632,7 @@ public final class MainActivity extends Activity {
         EditText body = input(form, "示例短信正文", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         sender.setText("10086");
         body.setText("您的验证码是 123456，5 分钟内有效");
-        new AlertDialog.Builder(this)
-                .setTitle("规则测试")
-                .setView(form)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("测试", (dialog, which) -> {
+        showGlassDialog("规则测试", form, "测试", () -> {
                     RuleConfig config = RuleConfig.load(this);
                     MessageFilter.Decision decision = MessageFilter.decide(
                             sender.getText().toString(),
@@ -1585,14 +1640,13 @@ public final class MainActivity extends Activity {
                             simRule.getSelectedItemPosition() - 1,
                             System.currentTimeMillis(),
                             config);
-                    new AlertDialog.Builder(this)
-                            .setTitle(decision == MessageFilter.Decision.FORWARD ? "会转发" : "不会转发")
-                            .setMessage(decision == MessageFilter.Decision.FORWARD
+                    showGlassDialog(
+                            decision == MessageFilter.Decision.FORWARD ? "会转发" : "不会转发",
+                            decision == MessageFilter.Decision.FORWARD
                                     ? "邮件正文预览：\n\n" + MessageFilter.transformBody(body.getText().toString(), config)
-                                    : "命中结果：" + decision.name())
-                            .setPositiveButton("知道了", null)
-                            .show();
-                }).show();
+                                    : "命中结果：" + decision.name(),
+                            "知道了", null, null);
+                }, "取消");
     }
 
     private void confirmClearQueue() {
@@ -1601,21 +1655,78 @@ public final class MainActivity extends Activity {
             showToast("当前没有待发送短信");
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle("清空待发送队列？")
-                .setMessage("将删除 " + count + " 条尚未成功发送的加密消息，删除后无法恢复。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("确认删除", (dialog, which) -> {
+        showGlassDialog(
+                "清空待发送队列？",
+                "将删除 " + count + " 条尚未成功发送的加密消息，删除后无法恢复。",
+                "确认删除", () -> {
                     QueueDatabase.get(this).clear();
                     AppConfig.setStatus(this, "待发送队列已由用户清空");
                     showPage(currentPage);
-                }).show();
+                }, "取消");
     }
 
     private void openAppSettings() {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         intent.setData(Uri.parse("package:" + getPackageName()));
-        startActivity(intent);
+        if (openResolvedIntent(intent, null)) return;
+        if (openResolvedIntent(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS), null)) return;
+        openResolvedIntent(new Intent(Settings.ACTION_SETTINGS), "系统没有可用的应用设置入口");
+    }
+
+    private void requestSmsPermission(boolean enableForwarding) {
+        if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED) {
+            if (enableForwarding) requestEnableForwarding();
+            else showToast("接收短信权限已经允许");
+            return;
+        }
+        enableAfterPermission = enableForwarding;
+        requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS}, REQUEST_RECEIVE_SMS);
+    }
+
+    @SuppressLint("BatteryLife")
+    private void requestBatteryExemption() {
+        DeviceHealth health = DeviceHealth.inspect(this);
+        if (health.batteryExempt) {
+            showToast("忽略电池优化已经允许");
+            showPage(currentPage);
+            return;
+        }
+        Intent direct = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:" + getPackageName()));
+        if (openResolvedIntent(direct, null)) return;
+        Intent list = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+        if (openResolvedIntent(list, null)) return;
+        openAppSettings();
+    }
+
+    private void runNextPermissionStep() {
+        DeviceHealth health = DeviceHealth.inspect(this);
+        if (!health.smsPermission) {
+            requestSmsPermission(false);
+        } else if (!health.batteryExempt) {
+            requestBatteryExemption();
+        } else if (!health.backgroundConfirmed) {
+            openHuaweiLaunchSettings();
+        } else {
+            showPage(PAGE_ONBOARDING);
+        }
+    }
+
+    private void openFirstTravelBlocker(DeviceHealth health) {
+        if (!health.smsPermission) {
+            requestSmsPermission(false);
+        } else if (!health.forwardingEnabled) {
+            requestEnableForwarding();
+        } else if (!health.smtpValid) {
+            showPage(PAGE_EMAIL);
+        } else if (!health.batteryExempt) {
+            requestBatteryExemption();
+        } else if (!health.backgroundConfirmed) {
+            openHuaweiLaunchSettings();
+        } else {
+            showPage(PAGE_GUARDIAN);
+            showToast("请发送一条真实短信，确认锁屏状态下能收到转发邮件");
+        }
     }
 
     private void checkForUpdates(boolean manual) {
@@ -1623,13 +1734,14 @@ public final class MainActivity extends Activity {
             return;
         }
         if (manual) {
-            showToast("正在检查 GitHub 正式版本…");
+            showToast("正在检查 GitHub "
+                    + (UpdateChecker.CHANNEL_BETA.equals(UpdateChecker.channel(this)) ? "Beta 与正式版本…" : "正式版本…"));
         }
         executor.execute(() -> {
             UpdateChecker.ReleaseInfo release = null;
             String errorMessage = null;
             try {
-                release = UpdateChecker.fetchLatest();
+                release = UpdateChecker.fetchLatest(this);
             } catch (Exception error) {
                 errorMessage = ForwardProcessor.safeMessage(error);
             }
@@ -1647,13 +1759,13 @@ public final class MainActivity extends Activity {
                 }
                 if (result == null) {
                     if (manual) {
-                        showToast("项目尚未发布稳定版本");
+                        showToast("所选更新通道暂无可用版本");
                     }
                     return;
                 }
                 if (!UpdateChecker.isNewer(result.version, BuildConfig.VERSION_NAME)) {
                     if (manual) {
-                        showToast("当前已经是最新稳定版本");
+                        showToast("当前已经是所选通道的最新版本");
                     }
                     return;
                 }
@@ -1663,22 +1775,16 @@ public final class MainActivity extends Activity {
     }
 
     private void showUpdateDialog(UpdateChecker.ReleaseInfo release) {
-        if (updateDialogShowing) {
-            return;
-        }
-        updateDialogShowing = true;
         String notes = release.notes.isEmpty() ? "请前往项目官方发布页查看更新内容。" : release.notes;
-        new AlertDialog.Builder(this)
-                .setTitle("发现雁笺 " + release.version)
-                .setMessage(notes
-                        + "\n\n将打开项目官方 GitHub Release。下载和安装都需要你确认，Android 会校验 APK 签名。")
-                .setNegativeButton("稍后", null)
-                .setPositiveButton("查看正式发布", (dialog, which) -> {
-                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl));
-                    startActivity(intent);
-                })
-                .setOnDismissListener(dialog -> updateDialogShowing = false)
-                .show();
+        showGlassDialog(
+                "发现雁笺 " + release.version + (release.prerelease ? " Beta" : ""),
+                notes + "\n\n将打开项目官方 GitHub Release。正式版与后续 Beta 使用同一签名后，可覆盖安装并保留本机配置。",
+                "查看" + (release.prerelease ? " Beta" : "正式发布"),
+                () -> {
+                    openResolvedIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl)),
+                            "无法打开浏览器，请稍后重试");
+                },
+                "稍后");
     }
 
     private void shareDiagnostics() {
@@ -1734,11 +1840,35 @@ public final class MainActivity extends Activity {
     }
 
     private void openHuaweiLaunchSettings() {
+        Intent[] candidates = new Intent[]{
+                new Intent().setComponent(new ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity")),
+                new Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER").setPackage("com.huawei.systemmanager"),
+                new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(Uri.parse("package:" + getPackageName()))
+        };
+        for (Intent candidate : candidates) {
+            if (openResolvedIntent(candidate, null)) {
+                showToast("请在系统页允许雁笺自启动、关联启动和后台活动，返回后再确认");
+                return;
+            }
+        }
+        openResolvedIntent(new Intent(Settings.ACTION_SETTINGS),
+                "系统未提供可用入口，请搜索“应用启动管理”并选择雁笺");
+    }
+
+    private boolean openResolvedIntent(Intent intent, String failureMessage) {
         try {
-            startActivity(new Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER"));
-        } catch (RuntimeException error) {
-            openAppSettings();
-            showToast("系统未开放直接入口，请在应用详情或“应用启动管理”中手动设置");
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                if (failureMessage != null) showToast(failureMessage);
+                return false;
+            }
+            startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException error) {
+            if (failureMessage != null) showToast(failureMessage);
+            return false;
         }
     }
 
@@ -1750,7 +1880,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(30), dp(30));
         iconParams.setMargins(0, 0, dp(7), 0);
         row.addView(providerIcon, iconParams);
-        Spinner provider = createSpinner(new String[]{"QQ 邮箱", "163/126 邮箱", "Gmail", "Outlook", "iCloud", "自定义"});
+        Spinner provider = createSpinner(new String[]{"QQ 邮箱", "飞书邮箱", "163/126 邮箱", "Gmail", "Outlook", "iCloud", "自定义"});
         LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
         providerParams.setMargins(0, 0, dp(8), 0);
         row.addView(provider, providerParams);
@@ -1767,26 +1897,31 @@ public final class MainActivity extends Activity {
         int security;
         switch (index) {
             case 1:
-                host = "smtp.163.com";
+                host = "smtp.feishu.cn";
                 port = 465;
                 security = 0;
                 break;
             case 2:
-                host = "smtp.gmail.com";
+                host = "smtp.163.com";
                 port = 465;
                 security = 0;
                 break;
             case 3:
+                host = "smtp.gmail.com";
+                port = 465;
+                security = 0;
+                break;
+            case 4:
                 host = "smtp-mail.outlook.com";
                 port = 587;
                 security = 1;
                 break;
-            case 4:
+            case 5:
                 host = "smtp.mail.me.com";
                 port = 587;
                 security = 1;
                 break;
-            case 5:
+            case 6:
                 return;
             default:
                 host = "smtp.qq.com";
@@ -1847,6 +1982,25 @@ public final class MainActivity extends Activity {
         password.setText(profile.password);
         from.setText(profile.fromAddress);
         recipients.setText(profile.recipientsText);
+    }
+
+    private void bindSecurityPort(Spinner security, EditText port) {
+        security.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String current = port.getText().toString().trim();
+                if (current.isEmpty() || "465".equals(current) || "587".equals(current)) {
+                    port.setText(position == 1 ? "587" : "465");
+                    port.setSelection(port.getText().length());
+                }
+                port.setContentDescription(position == 1
+                        ? "STARTTLS 端口，推荐 587" : "SSL TLS 端口，推荐 465");
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
     }
 
     private LinearLayout card() {
@@ -2766,6 +2920,17 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    private View actionStatusRow(
+            Icon iconValue, String title, String state, boolean complete, Runnable action) {
+        View row = statusRow(iconValue, title, state, complete);
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setContentDescription(title + "，" + state);
+        row.setOnClickListener(view -> action.run());
+        MotionEffects.bindPress(row);
+        return row;
+    }
+
     private void addHistorySummary(List<HistoryItem> history) {
         int success = 0;
         int filtered = 0;
@@ -3111,8 +3276,109 @@ public final class MainActivity extends Activity {
         return Math.round(value * UI_SCALE * getResources().getDisplayMetrics().density);
     }
 
+    private void showGlassDialog(
+            String title, String message, String positiveLabel,
+            Runnable positiveAction, String negativeLabel) {
+        TextView body = text(message, 14f, COLOR_MUTED, false);
+        body.setPadding(dp(2), dp(3), dp(2), dp(5));
+        body.setLineSpacing(dp(2), 1.08f);
+        body.setMaxLines(16);
+        body.setEllipsize(TextUtils.TruncateAt.END);
+        showGlassDialog(title, body, positiveLabel, positiveAction, negativeLabel);
+    }
+
+    private void showGlassDialog(
+            String title, View content, String positiveLabel,
+            Runnable positiveAction, String negativeLabel) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(22), dp(20), dp(22), dp(18));
+        panel.setBackground(glassSurface(30));
+        applyGlassDepth(panel, 18f, true);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout iconWell = new LinearLayout(this);
+        iconWell.setGravity(Gravity.CENTER);
+        iconWell.setBackground(glassSelection());
+        ImageView iconView = new ImageView(this);
+        iconView.setImageDrawable(icon(MaterialCommunityIcons.mdi_shield_outline, COLOR_JADE_DARK, 24));
+        iconWell.addView(iconView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        heading.addView(iconWell, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        TextView headingText = text(title, 20f, COLOR_INK, true);
+        headingText.setPadding(dp(12), 0, 0, 0);
+        heading.addView(headingText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        panel.addView(heading, matchWrap());
+
+        ScrollView bodyScroll = new ScrollView(this);
+        bodyScroll.setFillViewport(false);
+        bodyScroll.setClipToPadding(false);
+        bodyScroll.setPadding(0, dp(14), 0, dp(13));
+        bodyScroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams bodyParams = matchWrap();
+        panel.addView(bodyScroll, bodyParams);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        if (negativeLabel != null && !negativeLabel.isBlank()) {
+            Button negative = secondaryButton(negativeLabel);
+            negative.setOnClickListener(view -> dialog.dismiss());
+            LinearLayout.LayoutParams negativeParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            negativeParams.setMargins(0, 0, dp(8), 0);
+            actions.addView(negative, negativeParams);
+        }
+        Button positive = actionButton(positiveLabel, COLOR_JADE);
+        positive.setOnClickListener(view -> {
+            dialog.dismiss();
+            if (positiveAction != null) positiveAction.run();
+        });
+        actions.addView(positive, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        panel.addView(actions, matchWrap());
+
+        dialog.setContentView(panel);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams attributes = dialog.getWindow().getAttributes();
+            attributes.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.88f);
+            attributes.dimAmount = 0.42f;
+            dialog.getWindow().setAttributes(attributes);
+        }
+        dialog.setOnShowListener(ignored -> {
+            View decor = dialog.getWindow() == null ? panel : dialog.getWindow().getDecorView();
+            if (!MotionEffects.enabled(this)) {
+                decor.setAlpha(1f);
+                decor.setScaleX(1f);
+                decor.setScaleY(1f);
+                return;
+            }
+            decor.setAlpha(0f);
+            decor.setScaleX(0.96f);
+            decor.setScaleY(0.96f);
+            decor.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220L)
+                    .start();
+        });
+        dialog.show();
+    }
+
     private void showToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        Toast toast = new Toast(this);
+        TextView banner = text(message, 13f, COLOR_INK, true);
+        banner.setGravity(Gravity.CENTER_VERTICAL);
+        banner.setPadding(dp(17), dp(12), dp(17), dp(12));
+        banner.setCompoundDrawablePadding(dp(9));
+        banner.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialCommunityIcons.mdi_email_outline, COLOR_JADE_DARK, 21), null, null, null);
+        banner.setBackground(glassSurface(24));
+        applyGlassDepth(banner, 12f, true);
+        toast.setView(banner);
+        toast.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, dp(72));
+        toast.setDuration(Toast.LENGTH_LONG);
+        toast.show();
     }
 
     private static int strategyIndex(String value) {

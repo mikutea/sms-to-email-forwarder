@@ -52,33 +52,21 @@ final class ConfigBackup {
         if (backup == null) {
             backup = new JSONObject();
         }
-        AppConfig old = AppConfig.load(context);
-        AppConfig.save(
-                context,
-                primary.optString("host"),
-                primary.optInt("port", 465),
-                primary.optString("security", AppConfig.SECURITY_SSL_TLS),
-                primary.optString("username"),
-                "",
-                primary.optString("fromAddress"),
-                primary.optString("recipients"),
-                root.optBoolean("backupEnabled", false),
-                backup.optString("host"),
-                backup.optInt("port", 465),
-                backup.optString("security", AppConfig.SECURITY_SSL_TLS),
-                backup.optString("username"),
-                "",
-                backup.optString("fromAddress"),
-                backup.optString("recipients"),
-                root.optString("dispatchStrategy", AppConfig.STRATEGY_FAILOVER),
-                old.senderAllowlist,
-                true,
-                false,
-                false);
+        SmtpProfile importedPrimary = profileFromJson("主通道", primary);
+        boolean backupEnabled = root.optBoolean("backupEnabled", false);
+        SmtpProfile importedBackup = profileFromJson("备用通道", backup);
+        String profileError = importedPrimary.validateForImport();
+        if (profileError == null && backupEnabled) {
+            profileError = importedBackup.validateForImport();
+        }
+        if (profileError != null) {
+            throw new JSONException(profileError);
+        }
 
         JSONObject rules = root.optJSONObject("rules");
+        RuleConfig importedRules = null;
         if (rules != null) {
-            RuleConfig imported = new RuleConfig(
+            importedRules = new RuleConfig(
                     rules.optString("mode", RuleConfig.MODE_ALL),
                     rules.optString("senderAllow"),
                     rules.optString("senderBlock"),
@@ -92,16 +80,51 @@ final class ConfigBackup {
                     rules.optInt("endMinute", 0),
                     rules.optInt("weekdayMask", 0x7f),
                     rules.optString("contentMode", RuleConfig.CONTENT_FULL));
-            String error = imported.validate();
+            String error = importedRules.validate();
             if (error != null) {
                 throw new JSONException(error);
             }
-            RuleConfig.save(context, imported);
         }
-        TravelGuard.setHeartbeatHours(context, root.optInt("heartbeatHours", 12));
+
+        int heartbeatHours = root.optInt("heartbeatHours", 12);
+        if (heartbeatHours != 6 && heartbeatHours != 12 && heartbeatHours != 24) {
+            throw new JSONException("状态心跳间隔必须为 6、12 或 24 小时");
+        }
+
+        // All untrusted JSON is parsed and validated before the first preference is
+        // changed. A malformed backup therefore cannot erase an existing password
+        // or leave forwarding in a partially imported state.
+        AppConfig old = AppConfig.load(context);
+        AppConfig.save(
+                context,
+                importedPrimary.host, importedPrimary.port, importedPrimary.security,
+                importedPrimary.username, "", importedPrimary.fromAddress,
+                importedPrimary.recipientsText,
+                backupEnabled,
+                importedBackup.host, importedBackup.port, importedBackup.security,
+                importedBackup.username, "", importedBackup.fromAddress,
+                importedBackup.recipientsText,
+                root.optString("dispatchStrategy", AppConfig.STRATEGY_FAILOVER),
+                old.senderAllowlist, true, false, false);
+        if (importedRules != null) {
+            RuleConfig.save(context, importedRules);
+        }
+        TravelGuard.setHeartbeatHours(context, heartbeatHours);
         TravelGuard.setEnabled(context, false);
         TravelGuard.setBackgroundConfirmed(context, false);
         AppConfig.setStatus(context, "配置已导入；授权码、隐私确认和后台确认需要重新填写");
+    }
+
+    private static SmtpProfile profileFromJson(String name, JSONObject json) {
+        return new SmtpProfile(
+                name,
+                json.optString("host"),
+                json.optInt("port", 465),
+                json.optString("security", AppConfig.SECURITY_SSL_TLS),
+                json.optString("username"),
+                "",
+                json.optString("fromAddress"),
+                json.optString("recipients"));
     }
 
     private static JSONObject profileJson(SmtpProfile profile) throws JSONException {

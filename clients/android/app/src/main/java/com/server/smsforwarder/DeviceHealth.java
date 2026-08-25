@@ -13,6 +13,8 @@ import android.os.PowerManager;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 
 final class DeviceHealth {
     final boolean smsPermission;
@@ -83,8 +85,18 @@ final class DeviceHealth {
     }
 
     boolean readyForTravel() {
-        return smsPermission && forwardingEnabled && smtpValid && connected
-                && batteryExempt && backgroundConfirmed && lastSmsForwardedAt > 0L;
+        return travelBlockers().isEmpty();
+    }
+
+    List<String> travelBlockers() {
+        List<String> blockers = new ArrayList<>();
+        if (!smsPermission) blockers.add("允许接收短信");
+        if (!forwardingEnabled) blockers.add("启用自动转发");
+        if (!smtpValid) blockers.add("完成并测试 SMTP 配置");
+        if (!batteryExempt) blockers.add("允许忽略电池优化");
+        if (!backgroundConfirmed) blockers.add("确认厂商后台启动设置");
+        if (lastSmsForwardedAt <= 0L) blockers.add("完成一次真实短信闭环测试");
+        return blockers;
     }
 
     String summary() {

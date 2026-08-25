@@ -37,7 +37,7 @@ jobs:
       - name: Verify Gradle wrapper
         uses: gradle/actions/wrapper-validation@4733eaac7c1b0da527e4206b7671e0061de1ce37 # v6
 
-      - name: Validate stable release inputs
+      - name: Validate signed release inputs
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.YANJIAN_RELEASE_KEYSTORE_BASE64 }}
@@ -46,13 +46,13 @@ jobs:
           YANJIAN_KEY_PASSWORD: ${{ secrets.YANJIAN_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
           APP_VERSION="$(cd clients/android && ./gradlew -q :app:printVersionName)"
           APP_VERSION_CODE="$(cd clients/android && ./gradlew -q :app:printVersionCode)"
           test "${GITHUB_REF_NAME}" = "v${APP_VERSION}"
-          case "${APP_VERSION}" in *-*) echo "Prerelease version cannot create a stable release" >&2; exit 1;; esac
           test "${APP_VERSION_CODE}" -gt 0
           test -f "docs/release-notes/${APP_VERSION}.md"
+          test -f "release/signing-certificate.sha256"
           test -n "${KEYSTORE_BASE64}"
           test -n "${YANJIAN_KEYSTORE_PASSWORD}"
           test -n "${YANJIAN_KEY_ALIAS}"
@@ -61,6 +61,10 @@ jobs:
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
           echo "APP_VERSION=${APP_VERSION}" >> "${GITHUB_ENV}"
           echo "APP_VERSION_CODE=${APP_VERSION_CODE}" >> "${GITHUB_ENV}"
+          case "${APP_VERSION}" in
+            *-*) echo "IS_PRERELEASE=true" >> "${GITHUB_ENV}" ;;
+            *) echo "IS_PRERELEASE=false" >> "${GITHUB_ENV}" ;;
+          esac
 
       - name: Materialize ephemeral release keystore
         shell: bash
@@ -92,6 +96,10 @@ jobs:
           cp clients/android/app/build/outputs/apk/release/app-release.apk "${APK}"
           "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose --print-certs "${APK}" \
             > dist/SIGNING_CERTIFICATE.txt
+          EXPECTED_CERT="$(tr -d '[:space:]' < release/signing-certificate.sha256 | tr '[:upper:]' '[:lower:]')"
+          ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' dist/SIGNING_CERTIFICATE.txt | head -1 | tr '[:upper:]' '[:lower:]')"
+          [[ "${EXPECTED_CERT}" =~ ^[0-9a-f]{64}$ ]]
+          test "${ACTUAL_CERT}" = "${EXPECTED_CERT}"
           keytool -exportcert -rfc \
             -keystore "${RUNNER_TEMP}/yanjian-release.jks" \
             -storepass:env YANJIAN_KEYSTORE_PASSWORD \
@@ -130,17 +138,23 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish stable GitHub Release
+      - name: Publish signed GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --verify-tag \
-            --title "雁笺 ${APP_VERSION}" \
+          RELEASE_ARGS=(
+            "${GITHUB_REF_NAME}" dist/*
+            --repo "${GITHUB_REPOSITORY}"
+            --verify-tag
+            --title "雁笺 ${APP_VERSION}"
             --notes-file "docs/release-notes/${APP_VERSION}.md"
+          )
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            RELEASE_ARGS+=(--prerelease)
+          fi
+          gh release create "${RELEASE_ARGS[@]}"
 
       - name: Remove ephemeral keystore
         if: always()

@@ -52,6 +52,17 @@ final class SmtpProfile {
     }
 
     String validate() {
+        String structuralError = validateForImport();
+        if (structuralError != null) {
+            return structuralError;
+        }
+        if (password == null || password.isEmpty()) {
+            return "请填写" + name + " SMTP 授权码或应用专用密码";
+        }
+        return null;
+    }
+
+    String validateForImport() {
         String safeHost = host == null ? "" : host.trim();
         if (safeHost.isEmpty() || safeHost.length() > 253
                 || safeHost.matches(".*\\s.*") || safeHost.contains("://")) {
@@ -66,9 +77,6 @@ final class SmtpProfile {
         }
         if (username == null || username.trim().isEmpty()) {
             return "请填写" + name + " SMTP 用户名";
-        }
-        if (password == null || password.isEmpty()) {
-            return "请填写" + name + " SMTP 授权码或应用专用密码";
         }
         if (fromAddress == null
                 || !EMAIL.matcher(fromAddress.trim()).matches()) {

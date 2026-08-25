@@ -3,6 +3,7 @@ package com.server.smsforwarder;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -16,10 +17,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 final class UpdateChecker {
+    static final String CHANNEL_STABLE = "stable";
+    static final String CHANNEL_BETA = "beta";
     private static final String RELEASE_API =
-            "https://api.github.com/repos/mikutea/sms-to-email-forwarder/releases/latest";
+            "https://api.github.com/repos/mikutea/sms-to-email-forwarder/releases?per_page=20";
     private static final String PREFS = "yanjian_updates";
     private static final String KEY_AUTOMATIC = "automatic";
+    private static final String KEY_CHANNEL = "channel";
     private static final String KEY_LAST_AUTOMATIC_ATTEMPT = "last_automatic_attempt";
     private static final long AUTOMATIC_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final int MAX_RESPONSE_BYTES = 512 * 1024;
@@ -35,6 +39,17 @@ final class UpdateChecker {
         preferences(context).edit().putBoolean(KEY_AUTOMATIC, enabled).apply();
     }
 
+    static String channel(Context context) {
+        String value = preferences(context).getString(KEY_CHANNEL, CHANNEL_STABLE);
+        return CHANNEL_BETA.equals(value) ? CHANNEL_BETA : CHANNEL_STABLE;
+    }
+
+    static void setChannel(Context context, String channel) {
+        preferences(context).edit()
+                .putString(KEY_CHANNEL, CHANNEL_BETA.equals(channel) ? CHANNEL_BETA : CHANNEL_STABLE)
+                .apply();
+    }
+
     static boolean beginAutomaticCheck(Context context, long now) {
         if (!isAutomaticEnabled(context) || !AppConfig.load(context).privacyConsent) {
             return false;
@@ -48,7 +63,11 @@ final class UpdateChecker {
         return true;
     }
 
-    static ReleaseInfo fetchLatest() throws IOException, JSONException {
+    static ReleaseInfo fetchLatest(Context context) throws IOException, JSONException {
+        return fetchLatest(CHANNEL_BETA.equals(channel(context)));
+    }
+
+    static ReleaseInfo fetchLatest(boolean includeBeta) throws IOException, JSONException {
         HttpURLConnection connection = (HttpURLConnection) new URL(RELEASE_API).openConnection();
         connection.setConnectTimeout(6_000);
         connection.setReadTimeout(8_000);
@@ -58,9 +77,7 @@ final class UpdateChecker {
         connection.setRequestProperty("User-Agent", "Yanjian-Android/" + BuildConfig.VERSION_NAME);
         try {
             int status = connection.getResponseCode();
-            if (status == HttpURLConnection.HTTP_NOT_FOUND) {
-                return null;
-            }
+            if (status == HttpURLConnection.HTTP_NOT_FOUND) return null;
             if (status != HttpURLConnection.HTTP_OK) {
                 throw new IOException("GitHub Releases 返回 HTTP " + status);
             }
@@ -69,11 +86,33 @@ final class UpdateChecker {
                 throw new IOException("更新响应超过安全上限");
             }
             try (InputStream input = connection.getInputStream()) {
-                return parseRelease(readLimited(input));
+                return parseReleases(readLimited(input), includeBeta);
             }
         } finally {
             connection.disconnect();
         }
+    }
+
+    static ReleaseInfo parseReleases(String json, boolean includeBeta)
+            throws JSONException, IOException {
+        JSONArray releases = new JSONArray(json);
+        ReleaseInfo latest = null;
+        for (int index = 0; index < releases.length(); index++) {
+            JSONObject root = releases.optJSONObject(index);
+            if (root == null || root.optBoolean("draft", true)) continue;
+            boolean prerelease = root.optBoolean("prerelease", false);
+            if (prerelease && !includeBeta) continue;
+            ReleaseInfo candidate;
+            try {
+                candidate = parseReleaseObject(root, prerelease);
+            } catch (IOException ignored) {
+                continue;
+            }
+            if (latest == null || isNewer(candidate.version, latest.version)) {
+                latest = candidate;
+            }
+        }
+        return latest;
     }
 
     static ReleaseInfo parseRelease(String json) throws JSONException, IOException {
@@ -81,37 +120,71 @@ final class UpdateChecker {
         if (root.optBoolean("draft", true) || root.optBoolean("prerelease", true)) {
             throw new IOException("最新发布不是稳定版本");
         }
+        return parseReleaseObject(root, false);
+    }
+
+    private static ReleaseInfo parseReleaseObject(JSONObject root, boolean prerelease)
+            throws IOException {
         String tag = root.optString("tag_name", "").trim();
         String releaseUrl = root.optString("html_url", "").trim();
         if (!isOfficialReleaseUrl(releaseUrl)) {
             throw new IOException("发布地址不是项目官方 GitHub Release");
         }
         String version = normalizeVersion(tag);
-        if (version.isEmpty() || !version.matches("[0-9]+(?:\\.[0-9]+){1,3}")) {
+        if (!version.matches("[0-9]+(?:\\.[0-9]+){1,3}(?:-[0-9a-z.-]+)?")) {
             throw new IOException("发布版本号格式无效");
+        }
+        if (prerelease && !version.contains("-")) {
+            throw new IOException("测试版标签缺少预发布标识");
         }
         String title = singleLine(root.optString("name", "雁笺 " + tag), 100);
         String notes = root.optString("body", "").trim();
-        if (notes.length() > 4_000) {
-            notes = notes.substring(0, 4_000) + "\n…";
-        }
-        return new ReleaseInfo(version, title, notes, releaseUrl);
+        if (notes.length() > 4_000) notes = notes.substring(0, 4_000) + "\n…";
+        return new ReleaseInfo(version, title, notes, releaseUrl, prerelease);
     }
 
     static boolean isNewer(String remote, String current) {
-        String normalizedRemote = normalizeVersion(remote);
-        String normalizedCurrent = normalizeVersion(current);
-        int[] remoteParts = numericParts(normalizedRemote);
-        int[] currentParts = numericParts(normalizedCurrent);
-        int count = Math.max(remoteParts.length, currentParts.length);
+        String left = normalizeVersion(remote);
+        String right = normalizeVersion(current);
+        int[] leftCore = numericParts(left);
+        int[] rightCore = numericParts(right);
+        int count = Math.max(leftCore.length, rightCore.length);
         for (int index = 0; index < count; index++) {
-            int left = index < remoteParts.length ? remoteParts[index] : 0;
-            int right = index < currentParts.length ? currentParts[index] : 0;
-            if (left != right) {
-                return left > right;
-            }
+            int l = index < leftCore.length ? leftCore[index] : 0;
+            int r = index < rightCore.length ? rightCore[index] : 0;
+            if (l != r) return l > r;
         }
-        return !normalizedRemote.contains("-") && normalizedCurrent.contains("-");
+        String leftPre = prereleasePart(left);
+        String rightPre = prereleasePart(right);
+        if (leftPre.isEmpty() || rightPre.isEmpty()) {
+            return leftPre.isEmpty() && !rightPre.isEmpty();
+        }
+        return comparePrerelease(leftPre, rightPre) > 0;
+    }
+
+    private static int comparePrerelease(String left, String right) {
+        String[] l = left.split("\\.");
+        String[] r = right.split("\\.");
+        int count = Math.max(l.length, r.length);
+        for (int index = 0; index < count; index++) {
+            if (index >= l.length) return -1;
+            if (index >= r.length) return 1;
+            boolean ln = l[index].matches("[0-9]+");
+            boolean rn = r[index].matches("[0-9]+");
+            int comparison;
+            if (ln && rn) comparison = Integer.compare(parsePart(l[index]), parsePart(r[index]));
+            else if (ln != rn) comparison = ln ? -1 : 1;
+            else comparison = l[index].compareTo(r[index]);
+            if (comparison != 0) return comparison;
+        }
+        return 0;
+    }
+
+    private static String prereleasePart(String version) {
+        int separator = version.indexOf('-');
+        if (separator < 0) return "";
+        int metadata = version.indexOf('+', separator);
+        return version.substring(separator + 1, metadata < 0 ? version.length() : metadata);
     }
 
     private static String readLimited(InputStream input) throws IOException {
@@ -147,19 +220,21 @@ final class UpdateChecker {
         String[] tokens = stable.split("\\.");
         int[] result = new int[tokens.length];
         for (int index = 0; index < tokens.length; index++) {
-            try {
-                result[index] = Integer.parseInt(tokens[index]);
-            } catch (NumberFormatException error) {
-                result[index] = 0;
-            }
+            result[index] = parsePart(tokens[index]);
         }
         return result;
     }
 
-    private static String normalizeVersion(String value) {
-        if (value == null) {
-            return "";
+    private static int parsePart(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException error) {
+            return 0;
         }
+    }
+
+    private static String normalizeVersion(String value) {
+        if (value == null) return "";
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return normalized.startsWith("v") ? normalized.substring(1) : normalized;
     }
@@ -178,12 +253,15 @@ final class UpdateChecker {
         final String title;
         final String notes;
         final String releaseUrl;
+        final boolean prerelease;
 
-        ReleaseInfo(String version, String title, String notes, String releaseUrl) {
+        ReleaseInfo(String version, String title, String notes, String releaseUrl,
+                    boolean prerelease) {
             this.version = version;
             this.title = title;
             this.notes = notes;
             this.releaseUrl = releaseUrl;
+            this.prerelease = prerelease;
         }
     }
 }

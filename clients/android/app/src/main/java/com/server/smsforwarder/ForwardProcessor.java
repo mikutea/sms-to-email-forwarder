@@ -47,7 +47,7 @@ final class ForwardProcessor {
             } catch (MessagingException | RuntimeException error) {
                 int attempts = Math.min(item.attempts + 1, 1000);
                 boolean authenticationFailure = error instanceof AuthenticationFailedException;
-                String classified = classifyError(error, authenticationFailure);
+                String classified = SmtpFailure.describe(error);
                 database.markRetry(
                         item.id,
                         attempts,
@@ -128,13 +128,6 @@ final class ForwardProcessor {
         }
         int shift = Math.min(Math.max(attempts - 1, 0), 10);
         return Math.min(MAX_RETRY_MS, 30_000L * (1L << shift));
-    }
-
-    private static String classifyError(Throwable error, boolean authenticationFailure) {
-        if (authenticationFailure) {
-            return "SMTP 认证失败，请检查授权码和服务开关";
-        }
-        return "SMTP 发送失败：" + safeMessage(error);
     }
 
     static String safeMessage(Throwable error) {

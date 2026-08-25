@@ -30,4 +30,13 @@ public final class SmtpProfileTest {
                 "not-an-email");
         assertEquals("主通道收件邮箱格式不正确：not-an-email", invalid.validate());
     }
+
+    @Test
+    public void importValidationAllowsOmittedPasswordButStillChecksStructure() {
+        SmtpProfile imported = new SmtpProfile(
+                "主通道", "smtp.feishu.cn", 465, AppConfig.SECURITY_SSL_TLS,
+                "sender@example.com", "", "sender@example.com", "inbox@example.com");
+        assertEquals(null, imported.validateForImport());
+        assertEquals("请填写主通道 SMTP 授权码或应用专用密码", imported.validate());
+    }
 }

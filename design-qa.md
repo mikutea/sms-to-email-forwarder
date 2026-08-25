@@ -5,6 +5,7 @@
 - 唯一视觉基线：`docs/design/liquid-neumorphism-v2/01-onboarding-background-permission.png` 至 `08-settings-hub.png`。
 - 最终模拟器截图：`docs/design/liquid-neumorphism-v2/implemented/*-android.png`。
 - 同画布对照：`docs/design/liquid-neumorphism-v2/comparisons/*-comparison.png`，左侧为定稿，右侧为实现。
+- 1.0.0 权限、SMTP、旅行守护与 Beta 更新审计：`docs/design/liquid-neumorphism-v2/audit-v1-release-readiness/README.md`，包含当前版与修复版原始截图。
 - 定稿约为 852 × 1846；实现为 1080 × 2400。对照图把实现等比缩放到定稿高度并在同宽画布居中，不裁切、不拉伸。
 - 验证环境：项目专属测试目录中的 Android API 35、1080 × 2400、420 dpi 浅色虚拟设备。
 - 对照状态：Debug 专用 `visual_test_mode` 只注入合成邮箱、规则、记录与守护状态；Release 构建不会启用该状态，也不包含真实短信、手机号、SMTP 授权码或外发流量。
@@ -14,7 +15,7 @@
 - 页面结构：八页标题、信息顺序、首屏密度、主操作位置和底部导航关系均与定稿一致。
 - 品牌与图标：桌面图标、方形品牌标和自由飞雁使用同一折纸飞雁资产；操作图标统一为轮廓图标库，不使用字符或近似绘制。
 - 材质：卡片、输入框、辅助按钮、主按钮和底部导航统一使用月白纸面、青玉渐变、多层高光边缘与柔和环境阴影；选中项使用抬升的折射玻璃胶囊。
-- 控件状态：邮箱标签、规则摘要与时段、历史统计与时间线、5/6 后台授权、后台引导开关及维护诊断状态均与定稿使用同一状态进行比较。
+- 控件状态：邮箱标签、规则摘要与时段、历史统计与时间线、四项后台授权、系统确认和维护诊断状态均使用一致状态进行比较。
 - 字体与平台差异：中文字体光栅、系统 Switch/Spinner 的像素级抗锯齿由 Android 系统绘制；未发现影响层级、换行、间距或操作位置的 P1/P2 差异。
 
 ## 交互与可访问性
@@ -28,7 +29,7 @@
 
 ## 工程验证
 
-- JVM：26 项测试，0 failure、0 error、0 skipped。
+- JVM：31 项测试，0 failure、0 error、0 skipped。
 - Android Lint：`No issues found.`
 - 构建：Debug APK 与 Release APK 均成功生成。
 - 动画实现只使用属性动画与合成友好变换，不启用实时全屏模糊；软件渲染模拟器的压力数据用于发现回归，不能代替实体设备的动画手感和厂商后台长期运行验收。

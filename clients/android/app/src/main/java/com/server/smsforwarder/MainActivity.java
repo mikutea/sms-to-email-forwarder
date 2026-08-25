@@ -39,6 +39,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.Switch;
@@ -53,8 +54,11 @@ import com.joanzapata.iconify.fonts.MaterialCommunityModule;
 import com.joanzapata.iconify.fonts.MaterialIcons;
 import com.joanzapata.iconify.fonts.MaterialModule;
 
+import androidx.core.content.FileProvider;
+
 import java.text.SimpleDateFormat;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -64,6 +68,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.mail.MessagingException;
 
@@ -72,6 +77,8 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_RECEIVE_SMS = 1001;
     private static final int REQUEST_EXPORT_CONFIG = 1002;
     private static final int REQUEST_IMPORT_CONFIG = 1003;
+    private static final int REQUEST_INSTALL_SOURCE = 1004;
+    private static final int REQUEST_INSTALL_APK = 1005;
     private static final int PAGE_GUARDIAN = UiDestination.GUARDIAN;
     private static final int PAGE_EMAIL = UiDestination.EMAIL;
     private static final int PAGE_RULES = UiDestination.RULES;
@@ -109,6 +116,8 @@ public final class MainActivity extends Activity {
     private boolean enableAfterPermission;
     private boolean visualTestMode;
     private boolean firstResume = true;
+    private boolean awaitingInstallPermission;
+    private File pendingUpdateApk;
     private int historyFilter;
 
     private EditText primaryHost;
@@ -170,7 +179,14 @@ public final class MainActivity extends Activity {
             }
         }
         showPage(initialPage);
-        checkForUpdates(false);
+        if (visualTestMode && getIntent().getBooleanExtra("visual_test_install_cached_update", false)) {
+            verifyAndInstallCachedVisualUpdate();
+        } else if (visualTestMode
+                && getIntent().getBooleanExtra("visual_test_force_update", false)) {
+            checkForUpdates(true, true);
+        } else {
+            checkForUpdates(false, false);
+        }
     }
 
     @Override
@@ -209,6 +225,10 @@ public final class MainActivity extends Activity {
         } else if (page != null) {
             showPage(currentPage);
         }
+        if (awaitingInstallPermission) {
+            awaitingInstallPermission = false;
+            handleInstallPermissionReturn();
+        }
     }
 
     @Override
@@ -241,6 +261,13 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_INSTALL_SOURCE) {
+            return; // onResume() checks the real per-source authorization state.
+        }
+        if (requestCode == REQUEST_INSTALL_APK) {
+            if (resultCode != RESULT_OK) showToast("安装尚未完成，可再次检查更新重试");
+            return;
+        }
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
@@ -1427,6 +1454,9 @@ public final class MainActivity extends Activity {
                 (button, checked) -> UpdateChecker.setAutomaticEnabled(this, checked));
         updates.addView(automaticUpdates);
         updates.addView(hairlineDivider());
+        updates.addView(settingsInlineRow(
+                "应用内更新", "下载并校验后由系统确认安装", MaterialIcons.md_system_update, false));
+        updates.addView(hairlineDivider());
         View checkUpdate = settingsInlineRow(
                 "立即检查更新", "", MaterialIcons.md_refresh, true);
         checkUpdate.setOnClickListener(view -> checkForUpdates(true));
@@ -1734,6 +1764,10 @@ public final class MainActivity extends Activity {
     }
 
     private void checkForUpdates(boolean manual) {
+        checkForUpdates(manual, false);
+    }
+
+    private void checkForUpdates(boolean manual, boolean forceShow) {
         if (!manual && !UpdateChecker.beginAutomaticCheck(this, System.currentTimeMillis())) {
             return;
         }
@@ -1767,7 +1801,7 @@ public final class MainActivity extends Activity {
                     }
                     return;
                 }
-                if (!UpdateChecker.isNewer(result.version, BuildConfig.VERSION_NAME)) {
+                if (!forceShow && !UpdateChecker.isNewer(result.version, BuildConfig.VERSION_NAME)) {
                     if (manual) {
                         showToast("当前已经是所选通道的最新版本");
                     }
@@ -1778,17 +1812,225 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void verifyAndInstallCachedVisualUpdate() {
+        String version = UpdateChecker.normalizeVersion(
+                getIntent().getStringExtra("visual_test_update_version"));
+        File apk = AppUpdater.downloadedApk(this);
+        if (version.isEmpty() || !apk.isFile()) {
+            showToast("视觉测试更新文件或版本号缺失");
+            return;
+        }
+        UpdateChecker.ReleaseInfo release = new UpdateChecker.ReleaseInfo(
+                version, "雁笺视觉测试更新", "", "", true,
+                apk.getName(), "", "", apk.length());
+        executor.execute(() -> {
+            try {
+                AppUpdater.verifyPackage(this, apk, release);
+                pendingUpdateApk = apk;
+                runOnUiThread(this::requestInstallPermissionOrInstall);
+            } catch (Exception error) {
+                String message = ForwardProcessor.safeMessage(error);
+                runOnUiThread(() -> showGlassDialog(
+                        "测试更新校验失败", message, "知道了", null, null));
+            }
+        });
+    }
+
     private void showUpdateDialog(UpdateChecker.ReleaseInfo release) {
         String notes = release.notes.isEmpty() ? "请前往项目官方发布页查看更新内容。" : release.notes;
+        if (!release.hasDownload()) {
+            showGlassDialog(
+                    "发现雁笺 " + release.version + (release.prerelease ? " Beta" : ""),
+                    notes + "\n\n该发布缺少可验证的 APK 下载信息，将打开项目官方 GitHub Release。",
+                    "查看发布页",
+                    () -> openIntentSafely(new Intent(Intent.ACTION_VIEW,
+                                    Uri.parse(release.releaseUrl)),
+                            "无法打开浏览器，请稍后重试"),
+                    "稍后");
+            return;
+        }
         showGlassDialog(
                 "发现雁笺 " + release.version + (release.prerelease ? " Beta" : ""),
-                notes + "\n\n将打开项目官方 GitHub Release。正式版与后续 Beta 使用同一签名后，可覆盖安装并保留本机配置。",
-                "查看" + (release.prerelease ? " Beta" : "正式发布"),
-                () -> {
-                    openIntentSafely(new Intent(Intent.ACTION_VIEW, Uri.parse(release.releaseUrl)),
-                            "无法打开浏览器，请稍后重试");
-                },
+                notes + "\n\n雁笺将在应用内下载 APK，并校验大小、SHA-256、包名、版本号和正式签名。校验通过后由系统确认覆盖安装，本机配置会保留。",
+                "下载并更新",
+                () -> beginUpdateDownload(release),
                 "稍后");
+    }
+
+    private void beginUpdateDownload(UpdateChecker.ReleaseInfo release) {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        TextView status = text("正在连接 GitHub 安全下载通道…", 14f, COLOR_INK, true);
+        status.setPadding(dp(2), dp(2), dp(2), dp(10));
+        content.addView(status, matchWrap());
+
+        ProgressBar progress = new ProgressBar(
+                this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(1000);
+        progress.setProgress(0);
+        progress.setProgressTintList(ColorStateList.valueOf(COLOR_JADE_DARK));
+        progress.setProgressBackgroundTintList(ColorStateList.valueOf(COLOR_JADE_SOFT));
+        content.addView(progress, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(8)));
+
+        TextView detail = text("0% · 下载后自动执行五项安全校验", 11.5f, COLOR_MUTED, false);
+        detail.setPadding(dp(2), dp(10), dp(2), dp(2));
+        detail.setCompoundDrawablePadding(dp(7));
+        detail.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialCommunityIcons.mdi_shield_outline, COLOR_JADE_DARK, 18),
+                null, null, null);
+        content.addView(detail, matchWrap());
+
+        Dialog dialog = showGlassDialog(
+                "正在下载雁笺 " + release.version,
+                content,
+                "取消下载",
+                () -> cancelled.set(true),
+                null);
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnCancelListener(ignored -> cancelled.set(true));
+
+        executor.execute(() -> {
+            try {
+                int[] lastProgress = {-1};
+                File apk = AppUpdater.download(this, release, new AppUpdater.ProgressListener() {
+                    @Override
+                    public void onProgress(long downloaded, long total) {
+                        int value = total <= 0L ? 0 : (int) Math.min(1000L,
+                                downloaded * 1000L / total);
+                        if (value == lastProgress[0]) return;
+                        lastProgress[0] = value;
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                progress.setProgress(value, MotionEffects.enabled(MainActivity.this));
+                            } else {
+                                progress.setProgress(value);
+                            }
+                            int percent = value / 10;
+                            status.setText(percent < 100 ? "正在下载更新…" : "正在验证更新安全性…");
+                            detail.setText(percent + "% · " + humanBytes(downloaded)
+                                    + " / " + humanBytes(total));
+                        });
+                    }
+
+                    @Override
+                    public boolean isCancelled() {
+                        return cancelled.get();
+                    }
+                });
+                AppUpdater.verifyPackage(this, apk, release);
+                pendingUpdateApk = apk;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    dialog.dismiss();
+                    requestInstallPermissionOrInstall();
+                });
+            } catch (Exception error) {
+                String message = ForwardProcessor.safeMessage(error);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    dialog.dismiss();
+                    if (!cancelled.get()) {
+                        showGlassDialog(
+                                "更新未能完成",
+                                message + "\n\n没有执行安装，现有版本和本机配置均未改变。",
+                                "重试", () -> beginUpdateDownload(release), "稍后");
+                    }
+                });
+            }
+        });
+    }
+
+    private void requestInstallPermissionOrInstall() {
+        if (pendingUpdateApk == null || !pendingUpdateApk.isFile()) {
+            showToast("更新文件已失效，请重新检查更新");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            showGlassDialog(
+                    "允许雁笺安装更新",
+                    "系统要求你首次允许“来自此来源的应用”。雁笺只会安装已通过哈希、包名和正式签名校验的自身更新；授权后返回即可继续。",
+                    "打开系统授权", this::openInstallSourceSettings, "稍后");
+            return;
+        }
+        launchSystemInstaller();
+    }
+
+    private void openInstallSourceSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            launchSystemInstaller();
+            return;
+        }
+        Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:" + getPackageName()));
+        try {
+            awaitingInstallPermission = true;
+            startActivityForResult(intent, REQUEST_INSTALL_SOURCE);
+        } catch (ActivityNotFoundException | SecurityException error) {
+            awaitingInstallPermission = false;
+            showGlassDialog(
+                    "无法打开安装授权",
+                    "请手动打开“设置 → 安全 → 安装外部来源应用 → 雁笺”，允许安装应用后返回重试。",
+                    "打开应用设置", this::openAppSettings, "稍后");
+        }
+    }
+
+    private void handleInstallPermissionReturn() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || getPackageManager().canRequestPackageInstalls()) {
+            launchSystemInstaller();
+            return;
+        }
+        showGlassDialog(
+                "安装授权尚未开启",
+                "系统仍未允许雁笺发起覆盖安装。更新文件已经安全保存在本机缓存中，你可以再次授权或稍后重新检查更新。",
+                "再次授权", this::openInstallSourceSettings, "稍后");
+    }
+
+    private void launchSystemInstaller() {
+        File apk = pendingUpdateApk;
+        if (apk == null || !apk.isFile()) {
+            showToast("更新文件已失效，请重新检查更新");
+            return;
+        }
+        Uri contentUri;
+        try {
+            contentUri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".updates", apk);
+        } catch (IllegalArgumentException error) {
+            showGlassDialog("无法准备安装", "更新文件不在受信任的应用缓存目录中。",
+                    "知道了", null, null);
+            return;
+        }
+
+        Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        install.setData(contentUri);
+        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        install.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+        try {
+            startActivityForResult(install, REQUEST_INSTALL_APK);
+        } catch (ActivityNotFoundException | SecurityException error) {
+            Intent fallback = new Intent(Intent.ACTION_VIEW);
+            fallback.setDataAndType(contentUri, "application/vnd.android.package-archive");
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (!openIntentSafely(fallback, null)) {
+                showGlassDialog(
+                        "系统安装器不可用",
+                        "当前系统没有提供可用的 APK 安装器。现有版本和本机配置未发生改变。",
+                        "知道了", null, null);
+            }
+        }
+    }
+
+    private static String humanBytes(long bytes) {
+        if (bytes < 1024L) return bytes + " B";
+        if (bytes < 1024L * 1024L) return String.format(
+                Locale.CHINA, "%.1f KB", bytes / 1024d);
+        return String.format(Locale.CHINA, "%.1f MB", bytes / (1024d * 1024d));
     }
 
     private void shareDiagnostics() {
@@ -3297,7 +3539,7 @@ public final class MainActivity extends Activity {
         return Math.round(value * UI_SCALE * getResources().getDisplayMetrics().density);
     }
 
-    private void showGlassDialog(
+    private Dialog showGlassDialog(
             String title, String message, String positiveLabel,
             Runnable positiveAction, String negativeLabel) {
         TextView body = text(message, 14f, COLOR_MUTED, false);
@@ -3305,10 +3547,10 @@ public final class MainActivity extends Activity {
         body.setLineSpacing(dp(2), 1.08f);
         body.setMaxLines(16);
         body.setEllipsize(TextUtils.TruncateAt.END);
-        showGlassDialog(title, body, positiveLabel, positiveAction, negativeLabel);
+        return showGlassDialog(title, body, positiveLabel, positiveAction, negativeLabel);
     }
 
-    private void showGlassDialog(
+    private Dialog showGlassDialog(
             String title, View content, String positiveLabel,
             Runnable positiveAction, String negativeLabel) {
         Dialog dialog = new Dialog(this);
@@ -3384,6 +3626,7 @@ public final class MainActivity extends Activity {
                     .start();
         });
         dialog.show();
+        return dialog;
     }
 
     private void showToast(String message) {

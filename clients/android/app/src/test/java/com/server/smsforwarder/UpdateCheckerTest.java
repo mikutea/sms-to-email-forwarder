@@ -70,4 +70,34 @@ public final class UpdateCheckerTest {
         assertTrue(UpdateChecker.isNewer("1.1.0-rc.1", "1.1.0-beta.10"));
         assertFalse(UpdateChecker.isNewer("1.1.0-beta.1", "1.1.0"));
     }
+
+    @Test
+    public void parsesVerifiedOfficialApkAsset() throws Exception {
+        String json = "{"
+                + "\"tag_name\":\"v1.1.0-beta.1\","
+                + "\"draft\":false,\"prerelease\":true,"
+                + "\"html_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.0-beta.1\","
+                + "\"assets\":[{"
+                + "\"name\":\"yanjian-v1.1.0-beta.1.apk\","
+                + "\"size\":2825000,"
+                + "\"digest\":\"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
+                + "\"browser_download_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.0-beta.1/yanjian-v1.1.0-beta.1.apk\"}]}";
+        UpdateChecker.ReleaseInfo release = UpdateChecker.parseReleases("[" + json + "]", true);
+        assertTrue(release.hasDownload());
+        assertEquals(2825000L, release.apkSize);
+        assertEquals("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                release.apkSha256);
+    }
+
+    @Test
+    public void rejectsLookalikeApkAsset() throws Exception {
+        String json = "{"
+                + "\"tag_name\":\"v1.1.0\",\"draft\":false,\"prerelease\":false,"
+                + "\"html_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.0\","
+                + "\"assets\":[{"
+                + "\"name\":\"yanjian-v1.1.0.apk\",\"size\":1234,"
+                + "\"digest\":\"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
+                + "\"browser_download_url\":\"https://github.example/mikutea/sms-to-email-forwarder/releases/download/v1.1.0/yanjian-v1.1.0.apk\"}]}";
+        assertFalse(UpdateChecker.parseRelease(json).hasDownload());
+    }
 }

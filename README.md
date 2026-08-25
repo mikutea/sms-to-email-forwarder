@@ -10,7 +10,7 @@
 
 [下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.0.apk) · [查看发布说明](docs/release-notes/1.1.0.md) · [安装与后台设置](docs/harmonyos-4-install.md)
 
-> 当前测试版：[`v1.1.1-beta.1`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.1)，增强移动网络与 SMTP 失败诊断，并修复守护页、授权码和关于页反馈的问题。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.1/yanjian-v1.1.1-beta.1.apk)
+> 当前测试版：[`v1.1.1-beta.2`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.2)，补全 JavaMail 下一层异常诊断，并修正 SMTP“已配置 / 已验证 / 验证失败”与旅行守护状态。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.2/yanjian-v1.1.1-beta.2.apk)
 
 ## 应用截图
 

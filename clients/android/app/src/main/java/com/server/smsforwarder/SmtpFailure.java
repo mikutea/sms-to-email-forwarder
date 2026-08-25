@@ -1,11 +1,18 @@
 package com.server.smsforwarder;
 
+import java.io.EOFException;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.mail.AuthenticationFailedException;
 import javax.mail.MessagingException;
@@ -14,11 +21,21 @@ import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 
 final class SmtpFailure {
+    private static final Pattern SMTP_REPLY_CODE = Pattern.compile(
+            "(?im)(?:^\\s*|\\b(?:response|reply|return code)\\s*[:=]\\s*)([45]\\d{2})(?=\\s|[-:])");
+
     private SmtpFailure() {
     }
 
     static String describe(Throwable error) {
-        switch (diagnosticCode(error)) {
+        String code = diagnosticCode(error);
+        if (code.startsWith("SMTP-4")) {
+            return "SMTP 服务器暂时拒绝会话：可能触发频率限制或服务繁忙，请稍后重试";
+        }
+        if (code.startsWith("SMTP-5")) {
+            return "SMTP 服务器拒绝邮件：请核对授权码、发件邮箱、收件邮箱和服务商客户端开关";
+        }
+        switch (code) {
             case "AUTH":
                 return "SMTP 认证失败：请确认已开启第三方客户端，并使用邮箱服务商生成的专用密码";
             case "TLS":
@@ -35,6 +52,8 @@ final class SmtpFailure {
                 return "无法连接 SMTP 服务器：端口与加密方式可能不匹配，移动网络也可能限制该端口";
             case "CONNECTION-RESET":
                 return "SMTP 网络连接被中断：请检查信号、VPN/私人 DNS 或运营商端口限制";
+            case "CONNECTION-CLOSED":
+                return "SMTP 服务器在会话中提前断开：移动网络可能干扰当前端口，请尝试 587 + STARTTLS，并检查 VPN/私人 DNS";
             case "ADDRESS":
                 return "邮件地址被服务器拒绝：请核对发件邮箱和收件邮箱";
             default:
@@ -47,14 +66,20 @@ final class SmtpFailure {
     }
 
     static boolean isAuthenticationFailure(Throwable error) {
-        return hasCause(error, AuthenticationFailedException.class);
+        return "AUTH".equals(diagnosticCode(error));
     }
 
     private static String diagnosticCode(Throwable error) {
         if (hasCause(error, AuthenticationFailedException.class)) return "AUTH";
-        if (hasCause(error, SSLHandshakeException.class) || hasCause(error, SSLException.class)) return "TLS";
+        int replyCode = smtpReplyCode(error);
+        if (replyCode == 530 || replyCode == 534 || replyCode == 535) return "AUTH";
+        if (hasCause(error, SSLHandshakeException.class) || hasCause(error, SSLException.class)
+                || messagesContain(error, "could not convert socket to tls", "starttls is required")) {
+            return "TLS";
+        }
         if (hasCause(error, UnknownHostException.class)) return "DNS";
-        if (hasCause(error, SocketTimeoutException.class)) return "TIMEOUT";
+        if (hasCause(error, SocketTimeoutException.class)
+                || messagesContain(error, "read timed out", "connect timed out")) return "TIMEOUT";
         if (messagesContain(error, "eperm", "eacces", "permission denied", "operation not permitted")) {
             return "NET-BLOCKED";
         }
@@ -66,24 +91,26 @@ final class SmtpFailure {
                 || messagesContain(error, "could not connect to smtp host", "connection refused")) {
             return "CONNECT";
         }
+        if (hasCause(error, EOFException.class)
+                || messagesContain(error, "eof on socket", "response: -1", "unexpected end of stream")) {
+            return "CONNECTION-CLOSED";
+        }
         if (hasCause(error, SocketException.class)) return "CONNECTION-RESET";
         if (hasCause(error, SendFailedException.class)) return "ADDRESS";
+        if (replyCode >= 400 && replyCode <= 599) return "SMTP-" + replyCode;
         if (hasCause(error, MessagingException.class)) return "SMTP-PROTOCOL";
         return "UNKNOWN";
     }
 
     private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {
-        Throwable current = error;
-        for (int depth = 0; current != null && depth < 12; depth++) {
+        for (Throwable current : exceptionGraph(error)) {
             if (type.isInstance(current)) return true;
-            current = current.getCause();
         }
         return false;
     }
 
     private static boolean messagesContain(Throwable error, String... needles) {
-        Throwable current = error;
-        for (int depth = 0; current != null && depth < 12; depth++) {
+        for (Throwable current : exceptionGraph(error)) {
             String message = current.getMessage();
             if (message != null) {
                 String lower = message.toLowerCase(Locale.ROOT);
@@ -91,8 +118,43 @@ final class SmtpFailure {
                     if (lower.contains(needle)) return true;
                 }
             }
-            current = current.getCause();
         }
         return false;
+    }
+
+    private static int smtpReplyCode(Throwable error) {
+        for (Throwable current : exceptionGraph(error)) {
+            String message = current.getMessage();
+            if (message == null) continue;
+            Matcher matcher = SMTP_REPLY_CODE.matcher(message);
+            if (matcher.find()) {
+                try {
+                    return Integer.parseInt(matcher.group(1));
+                } catch (NumberFormatException ignored) {
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static List<Throwable> exceptionGraph(Throwable error) {
+        List<Throwable> result = new ArrayList<>();
+        if (error == null) return result;
+        ArrayDeque<Throwable> pending = new ArrayDeque<>();
+        IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
+        pending.add(error);
+        while (!pending.isEmpty() && result.size() < 24) {
+            Throwable current = pending.removeFirst();
+            if (seen.put(current, Boolean.TRUE) != null) continue;
+            result.add(current);
+            Throwable cause = current.getCause();
+            if (cause != null && !seen.containsKey(cause)) pending.addLast(cause);
+            if (current instanceof MessagingException) {
+                Exception next = ((MessagingException) current).getNextException();
+                if (next != null && !seen.containsKey(next)) pending.addLast(next);
+            }
+        }
+        return result;
     }
 }

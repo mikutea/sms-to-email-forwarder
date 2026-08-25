@@ -11,12 +11,14 @@ import java.security.KeyStore;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
+import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 final class CryptoStore {
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final String KEY_ALIAS = "sms_forwarder_local_v1";
+    private static final String DEDUP_KEY_ALIAS = "sms_forwarder_dedup_v1";
     private static final byte FORMAT_VERSION = 1;
 
     private CryptoStore() {
@@ -65,6 +67,16 @@ final class CryptoStore {
         }
     }
 
+    static byte[] hmac(byte[] value) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(getOrCreateDedupKey());
+            return mac.doFinal(value);
+        } catch (GeneralSecurityException | java.io.IOException e) {
+            throw new IllegalStateException("无法生成本地去重标识", e);
+        }
+    }
+
     private static SecretKey getOrCreateKey() throws GeneralSecurityException, java.io.IOException {
         KeyStore keyStore = KeyStore.getInstance(KEYSTORE);
         keyStore.load(null);
@@ -80,6 +92,24 @@ final class CryptoStore {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setRandomizedEncryptionRequired(true)
+                .build());
+        return generator.generateKey();
+    }
+
+    private static SecretKey getOrCreateDedupKey()
+            throws GeneralSecurityException, java.io.IOException {
+        KeyStore keyStore = KeyStore.getInstance(KEYSTORE);
+        keyStore.load(null);
+        java.security.Key existing = keyStore.getKey(DEDUP_KEY_ALIAS, null);
+        if (existing instanceof SecretKey) {
+            return (SecretKey) existing;
+        }
+        KeyGenerator generator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_HMAC_SHA256, KEYSTORE);
+        generator.init(new KeyGenParameterSpec.Builder(
+                DEDUP_KEY_ALIAS,
+                KeyProperties.PURPOSE_SIGN)
+                .setDigests(KeyProperties.DIGEST_SHA256)
                 .build());
         return generator.generateKey();
     }

@@ -50,4 +50,24 @@ public final class UpdateCheckerTest {
                 + "\"html_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.0.0\"}";
         assertThrows(IOException.class, () -> UpdateChecker.parseRelease(json));
     }
+
+    @Test
+    public void betaChannelSelectsNewestPrerelease() throws Exception {
+        String json = "[{"
+                + "\"tag_name\":\"v1.1.0-beta.2\",\"draft\":false,\"prerelease\":true,"
+                + "\"html_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.0-beta.2\""
+                + "},{\"tag_name\":\"v1.0.0\",\"draft\":false,\"prerelease\":false,"
+                + "\"html_url\":\"https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.0.0\"}]";
+        UpdateChecker.ReleaseInfo release = UpdateChecker.parseReleases(json, true);
+        assertEquals("1.1.0-beta.2", release.version);
+        assertTrue(release.prerelease);
+        assertEquals("1.0.0", UpdateChecker.parseReleases(json, false).version);
+    }
+
+    @Test
+    public void comparesPrereleaseSequence() {
+        assertTrue(UpdateChecker.isNewer("1.1.0-beta.10", "1.1.0-beta.2"));
+        assertTrue(UpdateChecker.isNewer("1.1.0-rc.1", "1.1.0-beta.10"));
+        assertFalse(UpdateChecker.isNewer("1.1.0-beta.1", "1.1.0"));
+    }
 }

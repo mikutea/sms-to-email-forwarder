@@ -9,13 +9,21 @@ final class UiDestination {
     static final int SYSTEM_GUARDIAN = 5;
     static final int MAINTENANCE = 6;
     static final int ONBOARDING = 7;
+    static final int HEARTBEAT = 8;
+    static final int PRIVACY = 9;
+    static final int CONFIG_TRANSFER = 10;
+    static final int PLATFORM_CAPABILITIES = 11;
+    static final int OPEN_SOURCE_LICENSES = 12;
 
     private UiDestination() {
     }
 
     static int root(int destination) {
         if (destination == EMAIL || destination == SYSTEM_GUARDIAN
-                || destination == MAINTENANCE) {
+                || destination == MAINTENANCE || destination == HEARTBEAT
+                || destination == PRIVACY || destination == CONFIG_TRANSFER
+                || destination == PLATFORM_CAPABILITIES
+                || destination == OPEN_SOURCE_LICENSES) {
             return SETTINGS;
         }
         if (destination == ONBOARDING) {
@@ -25,6 +33,6 @@ final class UiDestination {
     }
 
     static boolean isValid(int destination) {
-        return destination >= GUARDIAN && destination <= ONBOARDING;
+        return destination >= GUARDIAN && destination <= OPEN_SOURCE_LICENSES;
     }
 }

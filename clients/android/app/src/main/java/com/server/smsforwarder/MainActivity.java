@@ -22,6 +22,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.text.method.PasswordTransformationMethod;
 import android.transition.AutoTransition;
 import android.transition.TransitionManager;
 import android.util.SparseArray;
@@ -641,7 +642,11 @@ public final class MainActivity extends Activity {
         applyGlassDepth(queue, 7f, false);
         page.addView(queue, cardParams());
 
-        TextView networkTip = text("持续充电并保持 Wi-Fi 或移动网络可用", 13f, COLOR_MUTED, false);
+        TextView networkTip = text(
+                health.networkLabel + " · 网络恢复后待发短信会自动补发",
+                13f,
+                health.connected ? COLOR_MUTED : COLOR_CINNABAR,
+                false);
         networkTip.setGravity(Gravity.CENTER);
         networkTip.setCompoundDrawablePadding(dp(8));
         networkTip.setCompoundDrawablesWithIntrinsicBounds(icon(MaterialCommunityIcons.mdi_wifi, COLOR_JADE, 20), null, null, null);
@@ -692,7 +697,7 @@ public final class MainActivity extends Activity {
         primary.addView(fieldLabel("SMTP 用户名"));
         primaryUsername = input(primary, "SMTP 用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         primary.addView(fieldLabel("授权码 / 应用专用密码"));
-        primaryPassword = input(primary, "授权码 / 应用专用密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        primaryPassword = passwordInput(primary, "授权码 / 应用专用密码");
         primary.addView(fieldLabel("发件邮箱"));
         primaryFrom = input(primary, "发件邮箱", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         primary.addView(fieldLabel("收件邮箱"));
@@ -740,7 +745,7 @@ public final class MainActivity extends Activity {
         backupCard.addView(fieldLabel("SMTP 用户名"));
         backupUsername = input(backupCard, "备用 SMTP 用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         backupCard.addView(fieldLabel("授权码 / 应用专用密码"));
-        backupPassword = input(backupCard, "备用授权码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        backupPassword = passwordInput(backupCard, "备用授权码");
         backupCard.addView(fieldLabel("发件邮箱"));
         backupFrom = input(backupCard, "备用发件邮箱", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         backupCard.addView(fieldLabel("收件邮箱"));
@@ -1216,8 +1221,10 @@ public final class MainActivity extends Activity {
                 "厂商后台启动", backgroundAllowed ? "已确认" : "点按设置", backgroundAllowed,
                 this::openHuaweiLaunchSettings));
         guide.addView(actionStatusRow(MaterialCommunityIcons.mdi_lock_outline,
-                "当前网络", lockNetwork ? "可用" : "当前离线", lockNetwork,
-                () -> showGlassDialog("网络状态", "网络连接属于实时状态，不需要额外权限。离家前请完成一次锁屏真实短信试投。", "知道了", null, null)));
+                "当前网络",
+                health.networkLabel,
+                lockNetwork,
+                () -> showNetworkStatus(health)));
         page.addView(guide, cardParams());
 
         Button continueGuide = actionButton(completed == 3 ? "进入锁屏试投" : "继续完成授权", COLOR_JADE);
@@ -1315,15 +1322,9 @@ public final class MainActivity extends Activity {
         LinearLayout identity = card();
         LinearLayout identityRow = new LinearLayout(this);
         identityRow.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView appIcon = new ImageView(this);
-        appIcon.setImageResource(R.drawable.yanjian_app_icon);
-        appIcon.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        appIcon.setContentDescription("雁笺应用图标");
-        applyGlassDepth(appIcon, 7f, false);
-        identityRow.addView(appIcon, new LinearLayout.LayoutParams(dp(64), dp(64)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(14), 0, 0, 0);
+        copy.setPadding(dp(2), dp(2), dp(2), dp(2));
         TextView name = text("雁笺", 24f, COLOR_INK, true);
         name.setTypeface(Typeface.SERIF, Typeface.BOLD);
         copy.addView(name);
@@ -1863,7 +1864,8 @@ public final class MainActivity extends Activity {
                 result = label + "测试邮件已被 SMTP 服务器接受";
                 success = true;
             } catch (MessagingException | RuntimeException error) {
-                result = label + "测试失败：" + SmtpFailure.describe(error);
+                result = label + "测试失败：" + SmtpFailure.describeForRecord(error)
+                        + " · " + NetworkState.diagnosticSummary(this);
                 success = false;
             }
             if (success) {
@@ -1971,6 +1973,35 @@ public final class MainActivity extends Activity {
         showGlassDialog(
                 "无法打开系统设置",
                 "当前系统没有向第三方 App 提供可用的设置入口。请手动打开“设置”，搜索“雁笺”进入应用详情。",
+                "知道了", null, null);
+    }
+
+    private void openBackgroundDataSettings() {
+        Intent perApp = new Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS);
+        perApp.setData(Uri.parse("package:" + getPackageName()));
+        if (openIntentSafely(perApp, null)) return;
+        if (openIntentSafely(new Intent(Settings.ACTION_DATA_USAGE_SETTINGS), null)) return;
+        openAppSettings();
+    }
+
+    private void showNetworkStatus(DeviceHealth health) {
+        if (health.backgroundDataRestricted) {
+            showGlassDialog(
+                    "移动网络后台受限",
+                    "系统省流量策略正在限制雁笺使用计费网络。请允许后台数据，或把雁笺加入“不受数据用量限制的应用”。",
+                    "打开流量设置", this::openBackgroundDataSettings, "稍后处理");
+            return;
+        }
+        if (!health.connected) {
+            showGlassDialog(
+                    "当前网络不可用",
+                    health.networkLabel + "。请检查移动数据、WLAN、VPN 或私人 DNS；网络恢复后待发短信会自动补发。",
+                    "打开流量设置", this::openBackgroundDataSettings, "稍后处理");
+            return;
+        }
+        showGlassDialog(
+                "网络状态正常",
+                health.networkLabel + "。网络连接属于实时状态，离家前仍建议完成一次锁屏真实短信试投。",
                 "知道了", null, null);
     }
 
@@ -2640,12 +2671,14 @@ public final class MainActivity extends Activity {
         name.setTypeface(Typeface.SERIF, Typeface.BOLD);
         name.setPadding(dp(13), 0, 0, 0);
         brand.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Button actionButton = secondaryButton(actionLabel);
-        actionButton.setOnClickListener(view -> action.run());
-        actionButton.setMinHeight(dp(MIN_TOUCH_DP));
-        actionButton.setPadding(dp(11), dp(5), dp(11), dp(5));
-        brand.addView(actionButton, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
+        if (!TextUtils.isEmpty(actionLabel) && action != null) {
+            Button actionButton = secondaryButton(actionLabel);
+            actionButton.setOnClickListener(view -> action.run());
+            actionButton.setMinHeight(dp(MIN_TOUCH_DP));
+            actionButton.setPadding(dp(11), dp(5), dp(11), dp(5));
+            brand.addView(actionButton, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
+        }
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, 0, 0, dp(16));
         page.addView(brand, params);
@@ -2732,7 +2765,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addGuardianHeader() {
-        addBrandHeader("退出向导", () -> showPage(PAGE_SETTINGS));
+        addBrandHeader(null, null);
         View headingGap = new View(this);
         page.addView(headingGap, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(20)));
@@ -3136,6 +3169,50 @@ public final class MainActivity extends Activity {
         params.setMargins(0, dp(2), 0, dp(2));
         parent.addView(view, params);
         return view;
+    }
+
+    private EditText passwordInput(LinearLayout parent, String hint) {
+        FrameLayout container = new FrameLayout(this);
+        EditText field = createInput(
+                hint,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        field.setTransformationMethod(PasswordTransformationMethod.getInstance());
+        field.setPadding(dp(13), dp(7), dp(58), dp(7));
+        container.addView(field, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        ImageView visibility = new ImageView(this);
+        visibility.setImageDrawable(icon(MaterialCommunityIcons.mdi_eye, COLOR_JADE_DARK, 22));
+        visibility.setBackground(roundRect(Color.TRANSPARENT, 20));
+        visibility.setPadding(dp(12), dp(12), dp(12), dp(12));
+        visibility.setContentDescription("显示授权码");
+        visibility.setClickable(true);
+        visibility.setFocusable(true);
+        visibility.setOnClickListener(view -> {
+            boolean reveal = field.getTransformationMethod() != null;
+            field.setTransformationMethod(reveal ? null : PasswordTransformationMethod.getInstance());
+            visibility.setImageDrawable(icon(
+                    reveal ? MaterialCommunityIcons.mdi_eye_off : MaterialCommunityIcons.mdi_eye,
+                    COLOR_JADE_DARK,
+                    22));
+            visibility.setContentDescription(reveal ? "隐藏授权码" : "显示授权码");
+            field.setSelection(field.getText().length());
+            field.requestFocus();
+        });
+        MotionEffects.bindPress(visibility);
+        FrameLayout.LayoutParams toggleParams = new FrameLayout.LayoutParams(
+                dp(MIN_TOUCH_DP),
+                dp(MIN_TOUCH_DP),
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        container.addView(visibility, toggleParams);
+        visibility.setElevation(dp(5));
+        visibility.bringToFront();
+
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMargins(0, dp(2), 0, dp(2));
+        parent.addView(container, params);
+        return field;
     }
 
     private EditText createInput(String hint, int inputType) {

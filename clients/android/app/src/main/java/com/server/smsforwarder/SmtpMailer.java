@@ -28,9 +28,9 @@ final class SmtpMailer {
         properties.put("mail.smtp.host", profile.host);
         properties.put("mail.smtp.port", Integer.toString(profile.port));
         properties.put("mail.smtp.auth", "true");
-        properties.put("mail.smtp.connectiontimeout", "6000");
-        properties.put("mail.smtp.timeout", "8000");
-        properties.put("mail.smtp.writetimeout", "8000");
+        properties.put("mail.smtp.connectiontimeout", "20000");
+        properties.put("mail.smtp.timeout", "30000");
+        properties.put("mail.smtp.writetimeout", "30000");
         properties.put("mail.smtp.ssl.checkserveridentity", "true");
 
         if (AppConfig.SECURITY_SSL_TLS.equals(profile.security)) {

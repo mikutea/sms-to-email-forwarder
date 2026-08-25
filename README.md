@@ -10,22 +10,24 @@
 
 [下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.0.apk) · [查看发布说明](docs/release-notes/1.1.0.md) · [安装与后台设置](docs/harmonyos-4-install.md)
 
+> 当前测试版：[`v1.1.1-beta.1`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.1)，增强移动网络与 SMTP 失败诊断，并修复守护页、授权码和关于页反馈的问题。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.1/yanjian-v1.1.1-beta.1.apk)
+
 ## 应用截图
 
-以下截图来自 Android 15 / API 35 隔离虚拟设备，仅使用合成短信、示例邮箱和模拟状态。
+以下截图来自 `v1.1.1-beta.1` 的 Android 15 / API 35 隔离虚拟设备，仅使用合成短信、示例邮箱和模拟状态。
 
 <p align="center">
-  <img src="docs/screenshots/1.1.0/01-guardian.png" width="23%" alt="旅行守护" />
-  <img src="docs/screenshots/1.1.0/02-email.png" width="23%" alt="邮箱通道和邮件预览" />
-  <img src="docs/screenshots/1.1.0/03-rules.png" width="23%" alt="转发规则" />
-  <img src="docs/screenshots/1.1.0/04-history.png" width="23%" alt="转发记录" />
+  <img src="docs/screenshots/1.1.1-beta.1/01-guardian.png" width="23%" alt="旅行守护" />
+  <img src="docs/screenshots/1.1.1-beta.1/02-email.png" width="23%" alt="邮箱通道和邮件预览" />
+  <img src="docs/screenshots/1.1.1-beta.1/03-rules.png" width="23%" alt="转发规则" />
+  <img src="docs/screenshots/1.1.1-beta.1/04-history.png" width="23%" alt="转发记录" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/1.1.0/05-settings.png" width="23%" alt="设置总览" />
-  <img src="docs/screenshots/1.1.0/06-system-guardian.png" width="23%" alt="系统守护" />
-  <img src="docs/screenshots/1.1.0/07-about.png" width="23%" alt="关于雁笺" />
-  <img src="docs/screenshots/1.1.0/08-open-source.png" width="23%" alt="开源许可" />
+  <img src="docs/screenshots/1.1.1-beta.1/05-settings.png" width="23%" alt="设置总览" />
+  <img src="docs/screenshots/1.1.1-beta.1/06-system-guardian.png" width="23%" alt="系统守护" />
+  <img src="docs/screenshots/1.1.1-beta.1/07-about.png" width="23%" alt="关于雁笺" />
+  <img src="docs/screenshots/1.1.1-beta.1/08-open-source.png" width="23%" alt="开源许可" />
 </p>
 
 ## 核心能力

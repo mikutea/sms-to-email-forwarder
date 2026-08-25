@@ -12,7 +12,11 @@ public final class UiDestinationTest {
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.EMAIL));
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.SYSTEM_GUARDIAN));
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.MAINTENANCE));
-        assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.ONBOARDING));
+    }
+
+    @Test
+    public void onboardingKeepsGuardianSelected() {
+        assertEquals(UiDestination.GUARDIAN, UiDestination.root(UiDestination.ONBOARDING));
     }
 
     @Test

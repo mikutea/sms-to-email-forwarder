@@ -16,12 +16,13 @@ Bring the native Android client back to the approved `月白青玉` visual basel
 
 ## Implementation decisions
 
-- Kept the approved visual tokens and folded-paper goose asset as the single brand source.
-- Limited glass treatment to navigation, selected capsules, back actions, tabs, chips, and auxiliary buttons. Content remains high-contrast soft-neumorphic paper.
-- Used an icon library rather than approximate code-drawn or text-symbol assets.
-- Kept Android-sized touch targets and scrollable long forms as intentional platform adaptations.
-- Preserved reduced-motion behavior and removed the most expensive full-screen scale and multi-layer reveal animations.
+- Treated the eight approved images as the sole source of truth for page order, geometry, density, surface balance and state.
+- Kept the approved folded-paper goose as the single brand source for the launcher, square brand tile and free-flight page headers.
+- Applied the same layered moon-white glass, cyan-jade ambient shadow and raised refractive selection treatment to cards, fields, buttons and navigation.
+- Used one outline icon library rather than approximate code-drawn or text-symbol assets.
+- Added a debug-only synthetic visual state so every comparison uses the same safe mailbox, rule, history and guardian state without changing release behavior.
+- Preserved reduced-motion behavior and avoided real-time blur or layout animation on long forms.
 
 ## Evidence
 
-The `implemented` directory contains the final API 35 emulator captures for all eight design source screens. See the repository-root `design-qa.md` for viewport, state, comparison, accessibility, interaction, and performance results.
+The `implemented` directory contains the final API 35 emulator captures for all eight design source screens. The `comparisons` directory contains the source and implementation on the same normalized canvas. See the repository-root `design-qa.md` for viewport, state, accessibility, interaction, engineering checks and the final verdict.

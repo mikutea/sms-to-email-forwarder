@@ -15,8 +15,11 @@ final class UiDestination {
 
     static int root(int destination) {
         if (destination == EMAIL || destination == SYSTEM_GUARDIAN
-                || destination == MAINTENANCE || destination == ONBOARDING) {
+                || destination == MAINTENANCE) {
             return SETTINGS;
+        }
+        if (destination == ONBOARDING) {
+            return GUARDIAN;
         }
         return destination;
     }

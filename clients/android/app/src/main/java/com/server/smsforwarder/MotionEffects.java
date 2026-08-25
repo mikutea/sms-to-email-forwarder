@@ -42,15 +42,16 @@ final class MotionEffects {
 
     static void enterPage(View view, float distancePx) {
         view.animate().cancel();
+        // Never leave the page transparent when onCreate/onResume request the same
+        // destination back-to-back. The previous alpha animation could be cancelled
+        // between those callbacks and strand the entire ScrollView at alpha 0.
+        view.setAlpha(1f);
         if (!enabled(view.getContext())) {
-            view.setAlpha(1f);
             view.setTranslationY(0f);
             return;
         }
-        view.setAlpha(0f);
         view.setTranslationY(distancePx);
         view.animate()
-                .alpha(1f)
                 .translationY(0f)
                 .setDuration(EMPHASIZED)
                 .setInterpolator(EASE_OUT)

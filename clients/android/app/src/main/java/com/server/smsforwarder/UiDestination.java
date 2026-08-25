@@ -14,6 +14,7 @@ final class UiDestination {
     static final int CONFIG_TRANSFER = 10;
     static final int PLATFORM_CAPABILITIES = 11;
     static final int OPEN_SOURCE_LICENSES = 12;
+    static final int LOCKSCREEN_TEST = 13;
 
     private UiDestination() {
     }
@@ -26,13 +27,13 @@ final class UiDestination {
                 || destination == OPEN_SOURCE_LICENSES) {
             return SETTINGS;
         }
-        if (destination == ONBOARDING) {
+        if (destination == ONBOARDING || destination == LOCKSCREEN_TEST) {
             return GUARDIAN;
         }
         return destination;
     }
 
     static boolean isValid(int destination) {
-        return destination >= GUARDIAN && destination <= OPEN_SOURCE_LICENSES;
+        return destination >= GUARDIAN && destination <= LOCKSCREEN_TEST;
     }
 }

@@ -22,6 +22,7 @@ public final class UiDestinationTest {
     @Test
     public void onboardingKeepsGuardianSelected() {
         assertEquals(UiDestination.GUARDIAN, UiDestination.root(UiDestination.ONBOARDING));
+        assertEquals(UiDestination.GUARDIAN, UiDestination.root(UiDestination.LOCKSCREEN_TEST));
     }
 
     @Test
@@ -33,9 +34,9 @@ public final class UiDestinationTest {
 
     @Test
     public void validatesDestinationBounds() {
-        assertTrue(UiDestination.isValid(UiDestination.OPEN_SOURCE_LICENSES));
+        assertTrue(UiDestination.isValid(UiDestination.LOCKSCREEN_TEST));
         assertFalse(UiDestination.isValid(-1));
-        assertFalse(UiDestination.isValid(UiDestination.OPEN_SOURCE_LICENSES + 1));
+        assertFalse(UiDestination.isValid(UiDestination.LOCKSCREEN_TEST + 1));
     }
 
     @Test
@@ -49,7 +50,8 @@ public final class UiDestinationTest {
                 UiDestination.CONFIG_TRANSFER,
                 UiDestination.MAINTENANCE,
                 UiDestination.PLATFORM_CAPABILITIES,
-                UiDestination.OPEN_SOURCE_LICENSES
+                UiDestination.OPEN_SOURCE_LICENSES,
+                UiDestination.LOCKSCREEN_TEST
         };
         for (int left = 0; left < destinations.length; left++) {
             for (int right = left + 1; right < destinations.length; right++) {

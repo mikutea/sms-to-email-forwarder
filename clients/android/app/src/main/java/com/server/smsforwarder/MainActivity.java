@@ -24,6 +24,7 @@ import android.text.InputType;
 import android.text.TextUtils;
 import android.transition.AutoTransition;
 import android.transition.TransitionManager;
+import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -92,13 +93,14 @@ public final class MainActivity extends Activity {
     private static final int PAGE_CONFIG_TRANSFER = UiDestination.CONFIG_TRANSFER;
     private static final int PAGE_PLATFORM_CAPABILITIES = UiDestination.PLATFORM_CAPABILITIES;
     private static final int PAGE_OPEN_SOURCE_LICENSES = UiDestination.OPEN_SOURCE_LICENSES;
+    private static final int PAGE_LOCKSCREEN_TEST = UiDestination.LOCKSCREEN_TEST;
 
     private static final int COLOR_INK = Color.rgb(15, 34, 48);
     private static final int COLOR_JADE = Color.rgb(78, 141, 124);
     private static final int COLOR_JADE_DARK = Color.rgb(28, 119, 104);
     private static final int COLOR_JADE_SOFT = Color.rgb(186, 224, 216);
-    private static final int COLOR_CINNABAR = Color.rgb(201, 75, 61);
-    private static final int COLOR_AMBER = Color.rgb(226, 137, 15);
+    private static final int COLOR_CINNABAR = Color.rgb(190, 65, 52);
+    private static final int COLOR_AMBER = Color.rgb(166, 89, 0);
     private static final int COLOR_PAPER = Color.rgb(248, 249, 248);
     private static final int COLOR_CARD = Color.rgb(252, 253, 252);
     private static final int COLOR_INSET = Color.rgb(240, 246, 244);
@@ -107,8 +109,10 @@ public final class MainActivity extends Activity {
     private static final int COLOR_MUTED = Color.rgb(94, 111, 126);
     private static final float UI_SCALE = 0.92f;
     private static final float TEXT_SCALE = 0.93f;
+    private static final int MIN_TOUCH_DP = 52;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final SparseArray<LinearLayout> rootPageCache = new SparseArray<>();
     private LinearLayout page;
     private LinearLayout navigation;
     private ScrollView pageScroll;
@@ -117,6 +121,7 @@ public final class MainActivity extends Activity {
     private boolean visualTestMode;
     private boolean firstResume = true;
     private boolean awaitingInstallPermission;
+    private boolean awaitingVendorSettingsReturn;
     private File pendingUpdateApk;
     private int historyFilter;
 
@@ -223,11 +228,18 @@ public final class MainActivity extends Activity {
         if (firstResume) {
             firstResume = false;
         } else if (page != null) {
+            rootPageCache.clear();
             showPage(currentPage);
         }
         if (awaitingInstallPermission) {
             awaitingInstallPermission = false;
             handleInstallPermissionReturn();
+        }
+        if (awaitingVendorSettingsReturn) {
+            awaitingVendorSettingsReturn = false;
+            if (!TravelGuard.isBackgroundConfirmed(this)) {
+                showVendorSettingsReturnDialog();
+            }
         }
     }
 
@@ -350,7 +362,7 @@ public final class MainActivity extends Activity {
         item.setContentDescription(label + "页面");
         item.setClickable(true);
         item.setFocusable(true);
-        item.setOnClickListener(view -> showPage(pageIndex));
+        item.setOnClickListener(view -> showPage(pageIndex, true));
         MotionEffects.bindPress(item);
         navigation.addView(item, new LinearLayout.LayoutParams(
                 0,
@@ -359,14 +371,41 @@ public final class MainActivity extends Activity {
     }
 
     private void showPage(int index) {
+        showPage(index, false);
+    }
+
+    private void showPage(int index, boolean preferCachedRoot) {
+        int previousPage = currentPage;
+        if (preferCachedRoot && isRootDestination(previousPage) && page != null) {
+            rootPageCache.put(previousPage, page);
+        }
+        LinearLayout cachedPage = preferCachedRoot && isRootDestination(index)
+                ? rootPageCache.get(index) : null;
         currentPage = index;
-        page.removeAllViews();
+        pageScroll.removeAllViews();
+        if (cachedPage != null) {
+            page = cachedPage;
+            pageScroll.addView(page, new ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            pageScroll.scrollTo(0, 0);
+            updateNavigation(index);
+            return;
+        }
+        page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        pageScroll.addView(page, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (!preferCachedRoot) {
+            rootPageCache.remove(index);
+        }
         pageScroll.scrollTo(0, 0);
         int topPadding = 40;
         if (index == PAGE_SETTINGS || index == PAGE_MAINTENANCE
                 || index == PAGE_HEARTBEAT || index == PAGE_PRIVACY
                 || index == PAGE_CONFIG_TRANSFER || index == PAGE_PLATFORM_CAPABILITIES
-                || index == PAGE_OPEN_SOURCE_LICENSES) {
+                || index == PAGE_OPEN_SOURCE_LICENSES || index == PAGE_LOCKSCREEN_TEST) {
             topPadding = 22;
         } else if (index == PAGE_SYSTEM_GUARDIAN) {
             topPadding = 38;
@@ -380,9 +419,21 @@ public final class MainActivity extends Activity {
             topPadding = 37;
         }
         page.setPadding(dp(29), dp(topPadding), dp(29), dp(18));
+        updateNavigation(index);
+        buildPage(index);
+        if (isRootDestination(index)) {
+            rootPageCache.put(index, page);
+        }
+        if (!preferCachedRoot) {
+            MotionEffects.enterPage(page, dp(10));
+        }
+    }
+
+    private void updateNavigation(int index) {
         int selectedRoot = rootPage(index);
         for (int i = 0; i < navigation.getChildCount(); i++) {
             LinearLayout item = (LinearLayout) navigation.getChildAt(i);
+            boolean wasSelected = item.isSelected();
             boolean selected = ((Integer) item.getTag()) == selectedRoot;
             ImageView iconView = (ImageView) item.findViewWithTag("icon");
             TextView labelView = (TextView) item.findViewWithTag("label");
@@ -398,8 +449,13 @@ public final class MainActivity extends Activity {
                 item.setElevation(0f);
             }
             item.setSelected(selected);
-            MotionEffects.select(item, selected, dp(2));
+            if (wasSelected != selected) {
+                MotionEffects.select(item, selected, dp(2));
+            }
         }
+    }
+
+    private void buildPage(int index) {
         switch (index) {
             case PAGE_EMAIL:
                 showEmailPage();
@@ -437,11 +493,18 @@ public final class MainActivity extends Activity {
             case PAGE_OPEN_SOURCE_LICENSES:
                 showOpenSourceLicensesPage();
                 break;
+            case PAGE_LOCKSCREEN_TEST:
+                showLockscreenTestPage();
+                break;
             default:
                 showOverviewPage();
                 break;
         }
-        MotionEffects.enterPage(page, dp(10));
+    }
+
+    private static boolean isRootDestination(int index) {
+        return index == PAGE_GUARDIAN || index == PAGE_RULES
+                || index == PAGE_HISTORY || index == PAGE_SETTINGS;
     }
 
     private static int rootPage(int pageIndex) {
@@ -518,6 +581,8 @@ public final class MainActivity extends Activity {
                 guardDegraded ? COLOR_CINNABAR : displayGuardEnabled ? COLOR_JADE_DARK : COLOR_MUTED, true);
         guardRow.addView(guardState);
         Switch guardSwitch = new Switch(this);
+        guardSwitch.setMinHeight(dp(MIN_TOUCH_DP));
+        guardSwitch.setMinWidth(dp(MIN_TOUCH_DP));
         guardSwitch.setChecked(displayGuardEnabled);
         guardSwitch.setContentDescription("旅行守护开关");
         guardSwitch.setButtonTintList(ColorStateList.valueOf(COLOR_JADE));
@@ -528,7 +593,7 @@ public final class MainActivity extends Activity {
             // enabled state while the persisted guard is still disabled.
             if (checked && !TravelGuard.isEnabled(this)) button.setChecked(false);
         });
-        guardRow.addView(guardSwitch, new LinearLayout.LayoutParams(dp(56), dp(42)));
+        guardRow.addView(guardSwitch, new LinearLayout.LayoutParams(dp(60), dp(MIN_TOUCH_DP)));
         page.addView(guardRow, cardParams());
 
         LinearLayout tools = card();
@@ -682,13 +747,14 @@ public final class MainActivity extends Activity {
         state.setPadding(dp(8), 0, 0, 0);
         connectionState.addView(state, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Button testPrimary = secondaryButton("测试主通道");
-        testPrimary.setMinHeight(dp(40));
+        testPrimary.setMinHeight(dp(MIN_TOUCH_DP));
         testPrimary.setOnClickListener(view -> {
             if (saveEmailConfiguration()) {
                 testProfile(AppConfig.load(this).primaryProfile(), "主通道");
             }
         });
-        connectionState.addView(testPrimary, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)));
+        connectionState.addView(testPrimary, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
         page.addView(connectionState, compactCardParams());
 
         LinearLayout fallback = groupedCard();
@@ -702,9 +768,11 @@ public final class MainActivity extends Activity {
         fallbackText.setPadding(dp(8), 0, 0, 0);
         fallback.addView(fallbackText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         backupEnabled = new Switch(this);
+        backupEnabled.setMinHeight(dp(MIN_TOUCH_DP));
+        backupEnabled.setMinWidth(dp(MIN_TOUCH_DP));
         backupEnabled.setChecked(visualTestMode || config.backupEnabled);
         backupEnabled.setContentDescription("失败时切换备用通道");
-        fallback.addView(backupEnabled, new LinearLayout.LayoutParams(dp(56), dp(36)));
+        fallback.addView(backupEnabled, new LinearLayout.LayoutParams(dp(60), dp(MIN_TOUCH_DP)));
         page.addView(fallback, compactCardParams());
 
         dispatchStrategy = createSpinner(new String[]{"主通道成功即止，失败切备用", "仅使用主通道", "主备通道都发送"});
@@ -827,8 +895,10 @@ public final class MainActivity extends Activity {
         scheduleToggle.addView(text("仅在指定时段转发", 14f, COLOR_INK, false),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         scheduleEnabled = new Switch(this);
+        scheduleEnabled.setMinHeight(dp(MIN_TOUCH_DP));
+        scheduleEnabled.setMinWidth(dp(MIN_TOUCH_DP));
         scheduleEnabled.setChecked(rules.scheduleEnabled);
-        scheduleToggle.addView(scheduleEnabled, new LinearLayout.LayoutParams(dp(52), dp(36)));
+        scheduleToggle.addView(scheduleEnabled, new LinearLayout.LayoutParams(dp(60), dp(MIN_TOUCH_DP)));
         scheduleCard.addView(scheduleToggle, matchWrap());
         scheduleCard.addView(fieldLabel("时间范围"));
         LinearLayout timeRow = new LinearLayout(this);
@@ -836,11 +906,11 @@ public final class MainActivity extends Activity {
         timeRow.setBackground(insetSurface(18));
         scheduleStart = compactTimeInput("开始 HH:mm");
         scheduleEnd = compactTimeInput("结束 HH:mm");
-        timeRow.addView(scheduleStart, new LinearLayout.LayoutParams(0, dp(36), 1f));
+        timeRow.addView(scheduleStart, new LinearLayout.LayoutParams(0, dp(MIN_TOUCH_DP), 1f));
         TextView dash = text("—", 15f, COLOR_JADE_DARK, true);
         dash.setGravity(Gravity.CENTER);
-        timeRow.addView(dash, new LinearLayout.LayoutParams(dp(28), dp(36)));
-        timeRow.addView(scheduleEnd, new LinearLayout.LayoutParams(0, dp(36), 1f));
+        timeRow.addView(dash, new LinearLayout.LayoutParams(dp(28), dp(MIN_TOUCH_DP)));
+        timeRow.addView(scheduleEnd, new LinearLayout.LayoutParams(0, dp(MIN_TOUCH_DP), 1f));
         LinearLayout.LayoutParams timeParams = matchWrap();
         timeParams.setMargins(0, dp(5), 0, dp(7));
         scheduleCard.addView(timeRow, timeParams);
@@ -857,7 +927,7 @@ public final class MainActivity extends Activity {
             weekdays[i].setText(dayNames[i]);
             weekdays[i].setChecked((rules.weekdayMask & (1 << i)) != 0);
             styleDayCheckBox(weekdays[i]);
-            LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(0, dp(32), 1f);
+            LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(0, dp(MIN_TOUCH_DP), 1f);
             dayParams.setMargins(dp(2), 0, dp(2), 0);
             dayRow.addView(weekdays[i], dayParams);
         }
@@ -1043,8 +1113,7 @@ public final class MainActivity extends Activity {
         boolean lockNetwork = visualTestMode || health.connected;
         int completed = (smsAllowed ? 1 : 0)
                 + (batteryAllowed ? 1 : 0)
-                + (backgroundAllowed ? 1 : 0)
-                + (lockNetwork ? 1 : 0);
+                + (backgroundAllowed ? 1 : 0);
 
         LinearLayout progress = card();
         LinearLayout progressTop = new LinearLayout(this);
@@ -1056,8 +1125,8 @@ public final class MainActivity extends Activity {
         shield.setImageDrawable(icon(MaterialIcons.md_verified_user, COLOR_JADE, 34));
         progressIcon.addView(shield, new LinearLayout.LayoutParams(dp(40), dp(40)));
         progressTop.addView(progressIcon, new LinearLayout.LayoutParams(dp(58), dp(58)));
-        TextView progressTitle = text("后台守护  " + completed + " / 4  已完成", 20f,
-                completed == 4 ? COLOR_JADE_DARK : COLOR_AMBER, true);
+        TextView progressTitle = text("后台设置  " + completed + " / 3  已完成", 20f,
+                completed == 3 ? COLOR_JADE_DARK : COLOR_AMBER, true);
         progressTitle.setPadding(dp(14), 0, 0, 0);
         progressTop.addView(progressTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         progress.addView(progressTop, matchWrap());
@@ -1068,8 +1137,8 @@ public final class MainActivity extends Activity {
             progressLine.setBackground(roundRect(COLOR_JADE, 4));
             progressTrack.addView(progressLine, new LinearLayout.LayoutParams(0, dp(7), completed));
         }
-        if (completed < 4) {
-            progressTrack.addView(new View(this), new LinearLayout.LayoutParams(0, dp(7), 4 - completed));
+        if (completed < 3) {
+            progressTrack.addView(new View(this), new LinearLayout.LayoutParams(0, dp(7), 3 - completed));
         }
         LinearLayout.LayoutParams progressParams = matchWrap();
         progressParams.height = dp(7);
@@ -1093,9 +1162,14 @@ public final class MainActivity extends Activity {
                 () -> showGlassDialog("网络状态", "网络连接属于实时状态，不需要额外权限。离家前请完成一次锁屏真实短信试投。", "知道了", null, null)));
         page.addView(guide, cardParams());
 
-        Button continueGuide = actionButton(completed == 4 ? "查看锁屏测试向导" : "继续完成授权", COLOR_JADE);
+        Button continueGuide = actionButton(completed == 3 ? "进入锁屏试投" : "继续完成授权", COLOR_JADE);
         continueGuide.setOnClickListener(view -> runNextPermissionStep());
         page.addView(continueGuide, matchWrap());
+        if (!backgroundAllowed) {
+            Button confirmVendor = secondaryButton("我已完成厂商后台启动设置");
+            confirmVendor.setOnClickListener(view -> showVendorSettingsManualConfirmation());
+            page.addView(confirmVendor, matchWrap());
+        }
         Button appSettings = secondaryButton("打开应用详情设置");
         appSettings.setOnClickListener(view -> openAppSettings());
         page.addView(appSettings, matchWrap());
@@ -1161,7 +1235,10 @@ public final class MainActivity extends Activity {
         Button sendNow = actionButton("立即发送一次心跳", COLOR_JADE);
         sendNow.setOnClickListener(view -> {
             if (!AppConfig.load(this).enabled) {
-                showToast("请先在守护页启用自动转发");
+                showGlassDialog(
+                        "暂时无法发送心跳",
+                        "状态心跳使用已经配置好的邮箱通道。请先启用自动转发，再回来进行手动自检。",
+                        "前往旅行守护", () -> showPage(PAGE_GUARDIAN), "稍后再说");
                 return;
             }
             TravelGuard.enqueueHeartbeatNow(this, "设置页手动自检", false);
@@ -1316,54 +1393,85 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(24)));
 
         DeviceHealth health = DeviceHealth.inspect(this);
+        boolean smsAllowed = visualTestMode || health.smsPermission;
+        boolean batteryAllowed = visualTestMode || health.batteryExempt;
+        boolean backgroundAllowed = visualTestMode || health.backgroundConfirmed;
         LinearLayout permissions = card();
         permissions.addView(actionStatusRow(MaterialCommunityIcons.mdi_message_text_outline,
-                "接收短信", health.smsPermission ? "已允许" : "点按授权", health.smsPermission,
+                "接收短信", smsAllowed ? "已允许" : "点按授权", smsAllowed,
                 () -> requestSmsPermission(false)));
         permissions.addView(hairlineDivider());
         permissions.addView(actionStatusRow(MaterialCommunityIcons.mdi_battery_charging,
-                "忽略电池优化", health.batteryExempt ? "已允许" : "点按授权", health.batteryExempt,
+                "忽略电池优化", batteryAllowed ? "已允许" : "点按授权", batteryAllowed,
                 this::requestBatteryExemption));
         permissions.addView(hairlineDivider());
         permissions.addView(actionStatusRow(MaterialIcons.md_power_settings_new,
                 "自启动 · 关联启动 · 后台活动",
-                health.backgroundConfirmed ? "已确认" : "点按设置",
-                health.backgroundConfirmed, this::openHuaweiLaunchSettings));
+                backgroundAllowed ? "已确认" : "点按设置",
+                backgroundAllowed, this::openHuaweiLaunchSettings));
         page.addView(permissions, cardParams());
 
-        Button launch = actionButton("完成下一项授权", COLOR_JADE);
+        Button launch = actionButton(backgroundAllowed ? "进入锁屏试投" : "完成下一项授权", COLOR_JADE);
         launch.setOnClickListener(view -> runNextPermissionStep());
         page.addView(launch, matchWrap());
-        Button done = new Button(this);
-        done.setText("我已完成");
-        done.setTextColor(COLOR_JADE_DARK);
-        done.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f * TEXT_SCALE);
-        done.setAllCaps(false);
-        done.setBackgroundColor(Color.TRANSPARENT);
-        done.setMinHeight(dp(42));
-        MotionEffects.bindPress(done);
-        done.setOnClickListener(view -> {
-            showGlassDialog(
-                    "确认厂商后台设置",
-                    "仅当你已在系统的“应用启动管理”中允许雁笺自启动、关联启动和后台活动时再确认。Android 不提供读取这些厂商开关的标准接口。",
-                    "我已在系统中完成",
-                    () -> {
-                        TravelGuard.setBackgroundConfirmed(this, true);
-                        showPage(PAGE_SYSTEM_GUARDIAN);
-                    },
-                    "返回检查");
-        });
-        page.addView(done, matchWrap());
-        TextView delay = navigationRow("仍然延迟？", "检查休眠时网络连接", MaterialIcons.md_help_outline);
-        delay.setOnClickListener(view -> requestBatteryExemption());
+        if (!backgroundAllowed) {
+            Button done = secondaryButton("我已完成后台启动设置");
+            done.setOnClickListener(view -> showVendorSettingsManualConfirmation());
+            page.addView(done, matchWrap());
+        }
+        TextView delay = navigationRow("锁屏试投与延迟排查", "验证真实短信并检查休眠网络", MaterialIcons.md_help_outline);
+        delay.setOnClickListener(view -> showPage(PAGE_LOCKSCREEN_TEST));
         page.addView(delay, cardParams());
-        TextView next = text("下一步：锁屏试投", 14f, COLOR_INK, true);
-        next.setGravity(Gravity.CENTER);
-        next.setCompoundDrawablePadding(dp(8));
-        next.setCompoundDrawablesWithIntrinsicBounds(
-                icon(MaterialIcons.md_verified_user, COLOR_JADE, 20), null, null, null);
-        next.setPadding(0, dp(6), 0, dp(4));
-        page.addView(next, matchWrap());
+    }
+
+    private void showLockscreenTestPage() {
+        addBrandHeader("退出向导", () -> showPage(PAGE_GUARDIAN));
+        addStepProgress(4, 4);
+        TextView title = text("完成锁屏试投", 31f, COLOR_INK, true);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setPadding(dp(8), 0, 0, 0);
+        page.addView(title);
+        TextView subtitle = text("用一条真实短信验证锁屏接收、入队与邮件投递", 14f, COLOR_MUTED, false);
+        subtitle.setPadding(dp(8), dp(4), 0, dp(14));
+        page.addView(subtitle);
+
+        DeviceHealth health = DeviceHealth.inspect(this);
+        boolean forwardingReady = visualTestMode || (health.forwardingEnabled && health.smtpValid);
+        boolean smsReceived = visualTestMode || health.lastSmsReceivedAt > 0L;
+        boolean smsForwarded = visualTestMode || health.lastSmsForwardedAt > 0L;
+
+        LinearLayout steps = card();
+        steps.addView(sectionHeader(MaterialIcons.md_verified_user, "试投步骤"));
+        steps.addView(statusRow(MaterialCommunityIcons.mdi_email_outline,
+                "1. 自动转发与邮箱", forwardingReady ? "已就绪" : "待完成", forwardingReady));
+        steps.addView(hairlineDivider());
+        steps.addView(statusRow(MaterialCommunityIcons.mdi_lock_outline,
+                "2. 锁屏后发送真实短信", smsReceived ? "已接收" : "等待短信", smsReceived));
+        steps.addView(hairlineDivider());
+        steps.addView(statusRow(MaterialCommunityIcons.mdi_send,
+                "3. 邮箱收到转发", smsForwarded ? "闭环通过" : "等待投递", smsForwarded));
+        page.addView(steps, cardParams());
+
+        LinearLayout live = card();
+        live.addView(sectionHeader(MaterialCommunityIcons.mdi_pulse, "实时状态"));
+        live.addView(settingsInlineRow("当前网络", health.networkLabel,
+                MaterialCommunityIcons.mdi_wifi, false));
+        live.addView(hairlineDivider());
+        String receivedAt = visualTestMode ? "今天 11:38"
+                : health.lastSmsReceivedAt <= 0L ? "尚无记录"
+                : new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                .format(new Date(health.lastSmsReceivedAt));
+        live.addView(settingsInlineRow("最近真实短信", receivedAt,
+                MaterialCommunityIcons.mdi_message_text_outline, false));
+        page.addView(live, cardParams());
+
+        Button refresh = actionButton(smsForwarded ? "试投已通过，返回旅行守护" : "刷新试投结果", COLOR_JADE);
+        refresh.setOnClickListener(view -> showPage(smsForwarded ? PAGE_GUARDIAN : PAGE_LOCKSCREEN_TEST));
+        page.addView(refresh, matchWrap());
+        Button email = secondaryButton("先发送一封测试邮件");
+        email.setOnClickListener(view -> testConfiguredProfile(false));
+        page.addView(email, matchWrap());
+        addNotice("测试邮件只能验证 SMTP。离家前仍需锁屏并从另一号码发送一条真实短信；雁笺检测到成功转发后会自动标记闭环通过。", page);
     }
 
     private void showMaintenancePage() {
@@ -1441,10 +1549,13 @@ public final class MainActivity extends Activity {
             public void onNothingSelected(AdapterView<?> parent) {
             }
         });
-        channelRow.addView(updateChannel, new LinearLayout.LayoutParams(dp(154), dp(42)));
+        channelRow.addView(updateChannel, new LinearLayout.LayoutParams(
+                dp(154), dp(MIN_TOUCH_DP)));
         updates.addView(channelRow);
         updates.addView(hairlineDivider());
         Switch automaticUpdates = new Switch(this);
+        automaticUpdates.setMinHeight(dp(MIN_TOUCH_DP));
+        automaticUpdates.setMinWidth(dp(MIN_TOUCH_DP));
         automaticUpdates.setText("每天最多自动检查一次所选通道");
         automaticUpdates.setTextColor(COLOR_INK);
         automaticUpdates.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f * TEXT_SCALE);
@@ -1477,12 +1588,18 @@ public final class MainActivity extends Activity {
         AppConfig config = AppConfig.load(this);
         String error = config.validateForForwarding();
         if (error != null) {
-            showToast("请先在“邮箱”页完成配置：" + error);
+            showGlassDialog(
+                    "邮箱配置尚未完成",
+                    error + "\n\n完成邮箱配置并发送测试邮件后，才能启用自动转发。",
+                    "前往邮箱配置", () -> showPage(PAGE_EMAIL), "稍后再说");
             return;
         }
         String ruleError = RuleConfig.load(this).validate();
         if (ruleError != null) {
-            showToast("请先修正规则：" + ruleError);
+            showGlassDialog(
+                    "转发规则需要修正",
+                    ruleError,
+                    "前往转发规则", () -> showPage(PAGE_RULES), "稍后再说");
             return;
         }
         if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -1572,7 +1689,10 @@ public final class MainActivity extends Activity {
         AppConfig config = AppConfig.load(this);
         String error = config.validateForForwarding();
         if (error != null) {
-            showToast("邮箱配置不完整：" + error);
+            showGlassDialog(
+                    "邮箱尚未就绪",
+                    error + "\n\n请先保存邮箱配置，再发送测试邮件。",
+                    "前往邮箱配置", () -> showPage(PAGE_EMAIL), "稍后再说");
             return;
         }
         testProfile(backup ? config.backupProfile() : config.primaryProfile(), backup ? "备用通道" : "主通道");
@@ -1734,6 +1854,10 @@ public final class MainActivity extends Activity {
     }
 
     private void runNextPermissionStep() {
+        if (visualTestMode) {
+            showPage(PAGE_LOCKSCREEN_TEST);
+            return;
+        }
         DeviceHealth health = DeviceHealth.inspect(this);
         if (!health.smsPermission) {
             requestSmsPermission(false);
@@ -1742,7 +1866,7 @@ public final class MainActivity extends Activity {
         } else if (!health.backgroundConfirmed) {
             openHuaweiLaunchSettings();
         } else {
-            showPage(PAGE_ONBOARDING);
+            showPage(PAGE_LOCKSCREEN_TEST);
         }
     }
 
@@ -2098,8 +2222,8 @@ public final class MainActivity extends Activity {
                         "com.huawei.systemmanager.optimize.process.ProtectActivity"))
         };
         for (Intent candidate : candidates) {
-            if (openIntentSafely(candidate, null)) {
-                showToast("请在系统页允许雁笺自启动、关联启动和后台活动，返回后再确认");
+            if (openVendorSettingsIntent(candidate,
+                    "请允许雁笺自动启动、关联启动和后台活动；返回后会自动确认")) {
                 return;
             }
         }
@@ -2110,19 +2234,57 @@ public final class MainActivity extends Activity {
         // startActivity() is not subject to the package-visibility query result.
         Intent appDetails = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.parse("package:" + getPackageName()));
-        if (openIntentSafely(appDetails, null)) {
-            showToast("已打开雁笺应用详情，请进入“耗电详情/应用启动管理”允许后台启动");
+        if (openVendorSettingsIntent(appDetails,
+                "请进入“耗电详情/应用启动管理”允许后台启动；返回后会自动确认")) {
             return;
         }
-        if (openIntentSafely(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS), null)
-                || openIntentSafely(new Intent(Settings.ACTION_SETTINGS), null)) {
-            showToast("请在设置中搜索“应用启动管理”，然后选择雁笺");
+        if (openVendorSettingsIntent(new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS),
+                "请搜索“应用启动管理”并选择雁笺；返回后会自动确认")
+                || openVendorSettingsIntent(new Intent(Settings.ACTION_SETTINGS),
+                "请搜索“应用启动管理”并选择雁笺；返回后会自动确认")) {
             return;
         }
         showGlassDialog(
                 "无法打开系统设置",
                 "鸿蒙没有向当前 App 暴露可用的设置页面。请手动打开“设置 → 应用和服务 → 应用启动管理 → 雁笺”。",
                 "知道了", null, null);
+    }
+
+    private boolean openVendorSettingsIntent(Intent intent, String guidance) {
+        awaitingVendorSettingsReturn = true;
+        if (openIntentSafely(intent, null)) {
+            showToast(guidance);
+            return true;
+        }
+        awaitingVendorSettingsReturn = false;
+        return false;
+    }
+
+    private void showVendorSettingsReturnDialog() {
+        showGlassDialog(
+                "后台启动设置完成了吗？",
+                "请确认雁笺的自动启动、关联启动和后台活动均已允许。鸿蒙不会把这三个厂商开关的状态返回给普通 App，因此需要你确认一次。",
+                "已全部允许",
+                () -> {
+                    TravelGuard.setBackgroundConfirmed(this, true);
+                    showPage(PAGE_SYSTEM_GUARDIAN);
+                    showToast("厂商后台启动设置已确认");
+                },
+                "继续设置",
+                this::openHuaweiLaunchSettings);
+    }
+
+    private void showVendorSettingsManualConfirmation() {
+        showGlassDialog(
+                "确认厂商后台设置",
+                "仅当你已在系统的“应用启动管理”中允许雁笺自动启动、关联启动和后台活动时再确认。这个确认不会代替系统开关。",
+                "我已全部允许",
+                () -> {
+                    TravelGuard.setBackgroundConfirmed(this, true);
+                    showPage(PAGE_SYSTEM_GUARDIAN);
+                },
+                "继续检查",
+                this::openHuaweiLaunchSettings);
     }
 
     private boolean openIntentSafely(Intent intent, String failureMessage) {
@@ -2144,13 +2306,15 @@ public final class MainActivity extends Activity {
         iconParams.setMargins(0, 0, dp(7), 0);
         row.addView(providerIcon, iconParams);
         Spinner provider = createSpinner(new String[]{"QQ 邮箱", "飞书邮箱", "163/126 邮箱", "Gmail", "Outlook", "iCloud", "自定义"});
-        LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(
+                0, dp(MIN_TOUCH_DP), 1f);
         providerParams.setMargins(0, 0, dp(8), 0);
         row.addView(provider, providerParams);
         Button apply = secondaryButton("套用预设");
-        apply.setMinHeight(dp(40));
+        apply.setMinHeight(dp(MIN_TOUCH_DP));
         apply.setOnClickListener(view -> applyProviderPreset(provider.getSelectedItemPosition(), primary));
-        row.addView(apply, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
+        row.addView(apply, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
         parent.addView(row, matchWrap());
     }
 
@@ -2291,7 +2455,7 @@ public final class MainActivity extends Activity {
                 icon(MaterialIcons.md_chevron_left, COLOR_JADE_DARK, 20), null, null, null);
         back.setCompoundDrawablePadding(dp(3));
         back.setOnClickListener(view -> action.run());
-        back.setMinHeight(dp(42));
+        back.setMinHeight(dp(MIN_TOUCH_DP));
         back.setPadding(dp(10), dp(5), dp(12), dp(5));
         return back;
     }
@@ -2311,9 +2475,10 @@ public final class MainActivity extends Activity {
         brand.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Button actionButton = secondaryButton(actionLabel);
         actionButton.setOnClickListener(view -> action.run());
-        actionButton.setMinHeight(dp(40));
+        actionButton.setMinHeight(dp(MIN_TOUCH_DP));
         actionButton.setPadding(dp(11), dp(5), dp(11), dp(5));
-        brand.addView(actionButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
+        brand.addView(actionButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, 0, 0, dp(16));
         page.addView(brand, params);
@@ -2340,7 +2505,7 @@ public final class MainActivity extends Activity {
         FrameLayout top = new FrameLayout(this);
         Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
         top.addView(back, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42), Gravity.START | Gravity.TOP));
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP), Gravity.START | Gravity.TOP));
         LinearLayout brand = new LinearLayout(this);
         brand.setGravity(Gravity.CENTER);
         brand.addView(birdMark(62, 52));
@@ -2374,7 +2539,15 @@ public final class MainActivity extends Activity {
         help.setImageDrawable(icon(MaterialIcons.md_help_outline, COLOR_JADE, 23));
         help.setBackground(roundStroke(Color.argb(238, 251, 252, 252), Color.WHITE, 22));
         help.setPadding(dp(8), dp(8), dp(8), dp(8));
-        top.addView(help, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        help.setContentDescription("后台守护说明");
+        help.setClickable(true);
+        help.setFocusable(true);
+        help.setOnClickListener(view -> showGlassDialog(
+                "后台守护说明",
+                "短信权限和忽略电池优化会由系统直接确认；厂商启动管理需要在系统页面允许后返回雁笺确认。当前网络只显示实时状态，不计入授权进度。",
+                "知道了", null, null));
+        MotionEffects.bindPress(help);
+        top.addView(help, new LinearLayout.LayoutParams(dp(MIN_TOUCH_DP), dp(MIN_TOUCH_DP)));
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, dp(2), 0, dp(14));
         page.addView(top, params);
@@ -2384,7 +2557,7 @@ public final class MainActivity extends Activity {
         FrameLayout top = new FrameLayout(this);
         Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
         top.addView(back, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42), Gravity.START | Gravity.CENTER_VERTICAL));
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP), Gravity.START | Gravity.CENTER_VERTICAL));
         LinearLayout brand = new LinearLayout(this);
         brand.setGravity(Gravity.CENTER);
         brand.addView(birdMark(58, 48));
@@ -2653,6 +2826,7 @@ public final class MainActivity extends Activity {
                     i == selectedIndex);
             label.setGravity(Gravity.CENTER);
             label.setPadding(dp(4), dp(8), dp(4), dp(8));
+            label.setMinHeight(dp(MIN_TOUCH_DP));
             label.setBackground(i == selectedIndex ? glassSelection() : roundRect(Color.TRANSPARENT, 19));
             if (i == selectedIndex) applyGlassDepth(label, 6f, true);
             label.setClickable(true);
@@ -2691,6 +2865,7 @@ public final class MainActivity extends Activity {
         input.setGravity(Gravity.CENTER);
         input.setInputType(InputType.TYPE_CLASS_DATETIME);
         input.setSingleLine(true);
+        input.setMinHeight(dp(MIN_TOUCH_DP));
         input.setPadding(dp(5), 0, dp(5), 0);
         input.setBackgroundColor(Color.TRANSPARENT);
         return input;
@@ -2839,7 +3014,7 @@ public final class MainActivity extends Activity {
         view.setTextColor(COLOR_INK);
         view.setHintTextColor(Color.rgb(126, 142, 148));
         view.setInputType(inputType);
-        view.setMinHeight(dp(40));
+        view.setMinHeight(dp(MIN_TOUCH_DP));
         view.setPadding(dp(13), dp(7), dp(13), dp(7));
         view.setBackground(insetSurface(18));
         applyGlassDepth(view, 3f, false);
@@ -2868,7 +3043,7 @@ public final class MainActivity extends Activity {
             }
         };
         spinner.setAdapter(adapter);
-        spinner.setMinimumHeight(dp(40));
+        spinner.setMinimumHeight(dp(MIN_TOUCH_DP));
         spinner.setPadding(dp(3), dp(2), dp(3), dp(2));
         spinner.setBackground(insetSurface(18));
         spinner.setPopupBackgroundDrawable(glassSurface(22));
@@ -2885,7 +3060,7 @@ public final class MainActivity extends Activity {
         TextView item = text(value == null ? "" : value, dropDown ? 13.5f : 13f,
                 selected ? COLOR_JADE_DARK : COLOR_INK, selected);
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setMinHeight(dp(dropDown ? 48 : 40));
+        item.setMinHeight(dp(MIN_TOUCH_DP));
         item.setPadding(dp(dropDown ? 15 : 11), dp(dropDown ? 10 : 7),
                 dp(dropDown ? 15 : 9), dp(dropDown ? 10 : 7));
         item.setCompoundDrawablePadding(dp(9));
@@ -2917,7 +3092,7 @@ public final class MainActivity extends Activity {
         button.setTextSize(15.5f);
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setMinHeight(dp(48));
+        button.setMinHeight(dp(MIN_TOUCH_DP));
         button.setBackground(jadeButtonSurface(color));
         applyGlassDepth(button, 9f, true);
         button.setPadding(dp(16), dp(8), dp(16), dp(8));
@@ -2932,7 +3107,7 @@ public final class MainActivity extends Activity {
         button.setTextSize(14f);
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setMinHeight(dp(42));
+        button.setMinHeight(dp(MIN_TOUCH_DP));
         button.setBackground(glassSurface(21));
         applyGlassDepth(button, 6f, false);
         button.setPadding(dp(12), dp(6), dp(12), dp(6));
@@ -3186,6 +3361,9 @@ public final class MainActivity extends Activity {
     private View actionStatusRow(
             Icon iconValue, String title, String state, boolean complete, Runnable action) {
         View row = statusRow(iconValue, title, state, complete);
+        // The entire activity is scaled to 92% for compact layouts. Keep tappable
+        // status rows above the 48 dp accessibility target after that transform.
+        row.setMinimumHeight(dp(56));
         row.setClickable(true);
         row.setFocusable(true);
         row.setContentDescription(title + "，" + state);
@@ -3317,7 +3495,7 @@ public final class MainActivity extends Activity {
     private Button historyRetryButton(HistoryItem item) {
         Button resend = secondaryButton("RETRY_WAIT".equals(item.status) ? "立即重试" : "重新转发");
         resend.setTextSize(11f);
-        resend.setMinHeight(dp(30));
+        resend.setMinHeight(dp(MIN_TOUCH_DP));
         resend.setPadding(dp(9), dp(2), dp(9), dp(2));
         resend.setOnClickListener(view -> {
             if (item.id.startsWith("visual-")) {
@@ -3455,13 +3633,13 @@ public final class MainActivity extends Activity {
         GradientDrawable rim = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 color == COLOR_JADE
-                        ? new int[]{Color.rgb(35, 137, 119), Color.rgb(20, 116, 101)}
+                        ? new int[]{Color.rgb(28, 110, 94), Color.rgb(18, 91, 78)}
                         : new int[]{color, color});
         rim.setCornerRadius(dp(25));
         GradientDrawable face = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 color == COLOR_JADE
-                        ? new int[]{Color.rgb(94, 181, 164), Color.rgb(55, 157, 139), Color.rgb(31, 132, 115)}
+                        ? new int[]{Color.rgb(58, 129, 111), Color.rgb(39, 118, 102), Color.rgb(24, 105, 90)}
                         : new int[]{color, color});
         face.setCornerRadius(dp(24));
         face.setStroke(dp(1), Color.argb(190, 255, 255, 255));
@@ -3553,6 +3731,24 @@ public final class MainActivity extends Activity {
     private Dialog showGlassDialog(
             String title, View content, String positiveLabel,
             Runnable positiveAction, String negativeLabel) {
+        return showGlassDialog(title, content, positiveLabel, positiveAction, negativeLabel, null);
+    }
+
+    private Dialog showGlassDialog(
+            String title, String message, String positiveLabel,
+            Runnable positiveAction, String negativeLabel, Runnable negativeAction) {
+        TextView body = text(message, 14f, COLOR_MUTED, false);
+        body.setPadding(dp(2), dp(3), dp(2), dp(5));
+        body.setLineSpacing(dp(2), 1.08f);
+        body.setMaxLines(16);
+        body.setEllipsize(TextUtils.TruncateAt.END);
+        return showGlassDialog(
+                title, body, positiveLabel, positiveAction, negativeLabel, negativeAction);
+    }
+
+    private Dialog showGlassDialog(
+            String title, View content, String positiveLabel,
+            Runnable positiveAction, String negativeLabel, Runnable negativeAction) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
 
@@ -3589,8 +3785,12 @@ public final class MainActivity extends Activity {
         actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         if (negativeLabel != null && !negativeLabel.isBlank()) {
             Button negative = secondaryButton(negativeLabel);
-            negative.setOnClickListener(view -> dialog.dismiss());
-            LinearLayout.LayoutParams negativeParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            negative.setOnClickListener(view -> {
+                dialog.dismiss();
+                if (negativeAction != null) negativeAction.run();
+            });
+            LinearLayout.LayoutParams negativeParams = new LinearLayout.LayoutParams(
+                    0, dp(MIN_TOUCH_DP), 1f);
             negativeParams.setMargins(0, 0, dp(8), 0);
             actions.addView(negative, negativeParams);
         }
@@ -3599,7 +3799,8 @@ public final class MainActivity extends Activity {
             dialog.dismiss();
             if (positiveAction != null) positiveAction.run();
         });
-        actions.addView(positive, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        actions.addView(positive, new LinearLayout.LayoutParams(
+                0, dp(MIN_TOUCH_DP), 1f));
         panel.addView(actions, matchWrap());
 
         dialog.setContentView(panel);

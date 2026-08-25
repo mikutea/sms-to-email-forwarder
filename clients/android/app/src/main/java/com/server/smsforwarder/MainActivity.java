@@ -94,6 +94,7 @@ public final class MainActivity extends Activity {
     private static final int PAGE_PLATFORM_CAPABILITIES = UiDestination.PLATFORM_CAPABILITIES;
     private static final int PAGE_OPEN_SOURCE_LICENSES = UiDestination.OPEN_SOURCE_LICENSES;
     private static final int PAGE_LOCKSCREEN_TEST = UiDestination.LOCKSCREEN_TEST;
+    private static final int PAGE_ABOUT = UiDestination.ABOUT;
 
     private static final int COLOR_INK = Color.rgb(15, 34, 48);
     private static final int COLOR_JADE = Color.rgb(78, 141, 124);
@@ -247,6 +248,16 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         executor.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        int parent = UiDestination.parent(currentPage);
+        if (parent >= 0) {
+            showPage(parent);
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override
@@ -405,7 +416,8 @@ public final class MainActivity extends Activity {
         if (index == PAGE_SETTINGS || index == PAGE_MAINTENANCE
                 || index == PAGE_HEARTBEAT || index == PAGE_PRIVACY
                 || index == PAGE_CONFIG_TRANSFER || index == PAGE_PLATFORM_CAPABILITIES
-                || index == PAGE_OPEN_SOURCE_LICENSES || index == PAGE_LOCKSCREEN_TEST) {
+                || index == PAGE_OPEN_SOURCE_LICENSES || index == PAGE_LOCKSCREEN_TEST
+                || index == PAGE_ABOUT) {
             topPadding = 22;
         } else if (index == PAGE_SYSTEM_GUARDIAN) {
             topPadding = 38;
@@ -430,6 +442,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateNavigation(int index) {
+        navigation.setVisibility(isRootDestination(index) ? View.VISIBLE : View.GONE);
         int selectedRoot = rootPage(index);
         for (int i = 0; i < navigation.getChildCount(); i++) {
             LinearLayout item = (LinearLayout) navigation.getChildAt(i);
@@ -495,6 +508,9 @@ public final class MainActivity extends Activity {
                 break;
             case PAGE_LOCKSCREEN_TEST:
                 showLockscreenTestPage();
+                break;
+            case PAGE_ABOUT:
+                showAboutPage();
                 break;
             default:
                 showOverviewPage();
@@ -757,6 +773,8 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP)));
         page.addView(connectionState, compactCardParams());
 
+        page.addView(emailPreviewCard(), cardParams());
+
         LinearLayout fallback = groupedCard();
         fallback.setOrientation(LinearLayout.HORIZONTAL);
         fallback.setGravity(Gravity.CENTER_VERTICAL);
@@ -830,6 +848,47 @@ public final class MainActivity extends Activity {
         Button save = actionButton("保存邮箱配置", COLOR_JADE);
         save.setOnClickListener(view -> saveEmailConfiguration());
         page.addView(save, matchWrap());
+    }
+
+    private LinearLayout emailPreviewCard() {
+        LinearLayout preview = new LinearLayout(this);
+        preview.setOrientation(LinearLayout.VERTICAL);
+        preview.setPadding(dp(2), dp(3), dp(2), dp(7));
+
+        TextView brand = text("雁笺  ·  收到新短信", 11.5f, COLOR_JADE_DARK, true);
+        brand.setAllCaps(false);
+        preview.addView(brand, matchWrap());
+
+        TextView subject = text("来自 10086 的短信", 19f, COLOR_INK, true);
+        subject.setPadding(0, dp(5), 0, dp(10));
+        preview.addView(subject, matchWrap());
+
+        LinearLayout metadata = new LinearLayout(this);
+        metadata.setOrientation(LinearLayout.HORIZONTAL);
+        metadata.setPadding(dp(11), dp(8), dp(11), dp(8));
+        metadata.setBackground(insetSurface(16));
+        metadata.addView(text("发送方\n10086", 11.5f, COLOR_MUTED, false), weightedWrap());
+        metadata.addView(text("接收时间\n今天 11:38", 11.5f, COLOR_MUTED, false), weightedWrap());
+        metadata.addView(text("SIM\nSIM 1", 11.5f, COLOR_MUTED, false), weightedWrap());
+        preview.addView(metadata, matchWrap());
+
+        TextView body = text("您的验证码是 123456，5 分钟内有效。", 14f, COLOR_INK, false);
+        body.setPadding(dp(12), dp(13), dp(12), dp(13));
+        body.setBackground(roundStroke(Color.argb(190, 245, 249, 247), COLOR_GLASS_BORDER, 17));
+        LinearLayout.LayoutParams bodyParams = matchWrap();
+        bodyParams.setMargins(0, dp(9), 0, 0);
+        preview.addView(body, bodyParams);
+
+        TextView deliveryId = text("投递编号  7f39a8c2d10e", 10.5f, COLOR_MUTED, false);
+        deliveryId.setPadding(dp(2), dp(9), 0, 0);
+        preview.addView(deliveryId, matchWrap());
+
+        return collapsibleCard(
+                MaterialCommunityIcons.mdi_email_outline,
+                "邮件样式预览",
+                "HTML 主视图 · 纯文本兼容",
+                preview,
+                visualTestMode);
     }
 
     private void showRulesPage() {
@@ -1072,7 +1131,7 @@ public final class MainActivity extends Activity {
                 () -> showPage(PAGE_HEARTBEAT)));
         page.addView(guardian, cardParams());
 
-        page.addView(settingsSectionLabel("数据与应用"));
+        page.addView(settingsSectionLabel("数据与隐私"));
         LinearLayout data = groupedCard();
         data.addView(settingsRow(
                 "隐私与安全",
@@ -1085,23 +1144,22 @@ public final class MainActivity extends Activity {
                 "无密码导入与导出",
                 MaterialIcons.md_swap_horiz,
                 () -> showPage(PAGE_CONFIG_TRANSFER)));
-        data.addView(hairlineDivider());
-        data.addView(settingsRow(
-                "维护与诊断",
-                "当前 " + BuildConfig.VERSION_NAME,
-                MaterialIcons.md_build,
-                () -> showPage(PAGE_MAINTENANCE)));
         page.addView(data, cardParams());
 
-        LinearLayout links = new LinearLayout(this);
-        links.setGravity(Gravity.CENTER);
-        View platform = toolCell(MaterialIcons.md_help_outline, "平台能力说明",
-                () -> showPage(PAGE_PLATFORM_CAPABILITIES));
-        View license = toolCell(MaterialIcons.md_code, "开源许可",
-                () -> showPage(PAGE_OPEN_SOURCE_LICENSES));
-        links.addView(platform, weightedWrap());
-        links.addView(license, weightedWrap());
-        page.addView(links, matchWrap());
+        page.addView(settingsSectionLabel("应用"));
+        LinearLayout application = groupedCard();
+        application.addView(settingsRow(
+                "维护与更新",
+                "诊断、队列与版本更新",
+                MaterialIcons.md_build,
+                () -> showPage(PAGE_MAINTENANCE)));
+        application.addView(hairlineDivider());
+        application.addView(settingsRow(
+                "关于雁笺",
+                "版本、平台能力与开源许可",
+                MaterialIcons.md_info_outline,
+                () -> showPage(PAGE_ABOUT)));
+        page.addView(application, cardParams());
     }
 
     private void showSystemGuardianPage() {
@@ -1251,6 +1309,60 @@ public final class MainActivity extends Activity {
         addNotice("心跳只能证明 App 当时仍可联网并完成邮件投递，不能替代真实短信与锁屏试投。", page);
     }
 
+    private void showAboutPage() {
+        addSubPageTitle("关于雁笺", "版本、兼容范围与开放源代码信息", PAGE_SETTINGS);
+
+        LinearLayout identity = card();
+        LinearLayout identityRow = new LinearLayout(this);
+        identityRow.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView appIcon = new ImageView(this);
+        appIcon.setImageResource(R.drawable.yanjian_app_icon);
+        appIcon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        appIcon.setContentDescription("雁笺应用图标");
+        applyGlassDepth(appIcon, 7f, false);
+        identityRow.addView(appIcon, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(14), 0, 0, 0);
+        TextView name = text("雁笺", 24f, COLOR_INK, true);
+        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        copy.addView(name);
+        copy.addView(text("版本 " + BuildConfig.VERSION_NAME + " · 短信直达邮箱", 13f,
+                COLOR_MUTED, false));
+        identityRow.addView(copy, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        identity.addView(identityRow, matchWrap());
+        TextView statement = text(
+                "短信在本机加密入队，并直接连接你配置的 SMTP 服务；雁笺不建设短信中转服务器。",
+                12.5f, COLOR_MUTED, false);
+        statement.setPadding(dp(2), dp(12), dp(2), dp(2));
+        identity.addView(statement, matchWrap());
+        page.addView(identity, cardParams());
+
+        page.addView(settingsSectionLabel("产品信息"));
+        LinearLayout links = groupedCard();
+        links.addView(settingsRow(
+                "版本与更新",
+                "稳定版通道 · 当前 " + BuildConfig.VERSION_NAME,
+                MaterialIcons.md_system_update,
+                () -> showPage(PAGE_MAINTENANCE)));
+        links.addView(hairlineDivider());
+        links.addView(settingsRow(
+                "平台与兼容性",
+                "Android、兼容 APK 的鸿蒙与 NEXT 边界",
+                MaterialIcons.md_phone_android,
+                () -> showPage(PAGE_PLATFORM_CAPABILITIES)));
+        links.addView(hairlineDivider());
+        links.addView(settingsRow(
+                "开源许可",
+                "雁笺 Apache-2.0 · 第三方组件声明",
+                MaterialIcons.md_code,
+                () -> showPage(PAGE_OPEN_SOURCE_LICENSES)));
+        page.addView(links, cardParams());
+
+        addNotice("正式包禁止系统截图；版本、许可和平台边界仍可随时在本页查看。", page);
+    }
+
     private void showPrivacyPage() {
         addSubPageTitle("隐私与安全", "看清短信、授权码和诊断信息如何被保护", PAGE_SETTINGS);
 
@@ -1313,7 +1425,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showPlatformCapabilitiesPage() {
-        addSubPageTitle("平台能力说明", "同一设计语言下，不同系统仍受各自权限模型限制", PAGE_SETTINGS);
+        addSubPageTitle("平台能力说明", "同一设计语言下，不同系统仍受各自权限模型限制", PAGE_ABOUT);
 
         page.addView(informationCard(
                 MaterialIcons.md_phone_android,
@@ -1338,16 +1450,19 @@ public final class MainActivity extends Activity {
     }
 
     private void showOpenSourceLicensesPage() {
-        addSubPageTitle("开源许可", "查看雁笺使用的主要开源组件与许可边界", PAGE_SETTINGS);
+        addSubPageTitle("开源许可", "项目协议、完整文本与第三方组件声明", PAGE_ABOUT);
 
         page.addView(informationCard(
                 MaterialIcons.md_code,
-                "雁笺项目源码",
-                "当前公开仓库尚未声明项目级开源许可证；源代码公开不等同于自动授予复制、修改或再发布权。"),
+                "雁笺 · Apache License 2.0",
+                "雁笺源代码以 Apache-2.0 开放：可在遵守许可证、保留版权与 NOTICE 的前提下使用、修改与再发布。"),
                 cardParams());
 
         LinearLayout dependencies = card();
         dependencies.addView(sectionHeader(MaterialIcons.md_apps, "主要第三方组件"));
+        dependencies.addView(settingsInlineRow(
+                "AndroidX Core", "Apache-2.0", MaterialIcons.md_extension, false));
+        dependencies.addView(hairlineDivider());
         dependencies.addView(settingsInlineRow(
                 "AndroidX WorkManager", "Apache-2.0", MaterialIcons.md_build, false));
         dependencies.addView(hairlineDivider());
@@ -1358,9 +1473,41 @@ public final class MainActivity extends Activity {
                 "RE2/J", "BSD-3-Clause", MaterialIcons.md_filter_list, false));
         dependencies.addView(hairlineDivider());
         dependencies.addView(settingsInlineRow(
-                "Android Mail / Activation", "上游双许可证", MaterialCommunityIcons.mdi_email_outline, false));
+                "Android Mail / Activation", "EPL-2.0 OR GPL-2.0+CPE",
+                MaterialCommunityIcons.mdi_email_outline, false));
         page.addView(dependencies, cardParams());
-        addNotice("依赖的完整许可文本与版权声明以各组件上游发行包为准；正式发布前应补齐项目级 LICENSE 与 NOTICE。", page);
+
+        LinearLayout fullLicense = new LinearLayout(this);
+        fullLicense.setOrientation(LinearLayout.VERTICAL);
+        TextView licenseText = text(readBundledLicense(), 10.5f, COLOR_MUTED, false);
+        licenseText.setTextIsSelectable(true);
+        licenseText.setLineSpacing(dp(1), 1.06f);
+        licenseText.setPadding(dp(3), dp(4), dp(3), dp(8));
+        fullLicense.addView(licenseText, matchWrap());
+        page.addView(collapsibleCard(
+                MaterialIcons.md_description,
+                "Apache-2.0 完整协议",
+                "点按展开 · 已内置，可离线查看",
+                fullLicense,
+                false), cardParams());
+
+        LinearLayout thirdParty = new LinearLayout(this);
+        thirdParty.setOrientation(LinearLayout.VERTICAL);
+        TextView thirdPartyText = text(readBundledText(
+                "licenses/third-party-notices.txt",
+                "无法读取内置第三方声明。请查看仓库 THIRD_PARTY_NOTICES.md。"),
+                10.5f, COLOR_MUTED, false);
+        thirdPartyText.setTextIsSelectable(true);
+        thirdPartyText.setLineSpacing(dp(1), 1.06f);
+        thirdPartyText.setPadding(dp(3), dp(4), dp(3), dp(8));
+        thirdParty.addView(thirdPartyText, matchWrap());
+        page.addView(collapsibleCard(
+                MaterialIcons.md_receipt,
+                "第三方声明",
+                "版本、许可证与上游项目",
+                thirdParty,
+                false), cardParams());
+        addNotice("第三方组件仍分别遵循其上游许可证；仓库根目录包含 LICENSE、NOTICE 与 THIRD_PARTY_NOTICES.md。", page);
     }
 
     private void showOnboardingPage() {
@@ -2209,6 +2356,26 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private String readBundledLicense() {
+        return readBundledText(
+                "licenses/apache-2.0.txt",
+                "无法读取内置许可证文本。请查看仓库根目录 LICENSE。");
+    }
+
+    private String readBundledText(String assetPath, String fallback) {
+        try (InputStream input = getAssets().open(assetPath);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return output.toString(StandardCharsets.UTF_8.name());
+        } catch (Exception error) {
+            return fallback;
+        }
+    }
+
     private void openHuaweiLaunchSettings() {
         Intent[] candidates = new Intent[]{
                 new Intent().setComponent(new ComponentName(
@@ -2502,28 +2669,11 @@ public final class MainActivity extends Activity {
     }
 
     private void addEmailHeader() {
-        FrameLayout top = new FrameLayout(this);
-        Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
-        top.addView(back, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP), Gravity.START | Gravity.TOP));
-        LinearLayout brand = new LinearLayout(this);
-        brand.setGravity(Gravity.CENTER);
-        brand.addView(birdMark(62, 52));
-        TextView title = text("邮箱通道", 25f, COLOR_INK, true);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
-        title.setPadding(dp(8), 0, 0, 0);
-        brand.addView(title);
-        top.addView(brand, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM));
-        page.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(74)));
-        TextView subtitle = text("直连你的 SMTP，授权码仅加密保存在本机", 13f, COLOR_MUTED, false);
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(3), 0, dp(11));
-        page.addView(subtitle, matchWrap());
+        addSubPageTitle("邮箱通道", "直连你的 SMTP，授权码仅加密保存在本机", PAGE_SETTINGS);
     }
 
     private void addSystemGuardianHeader() {
+        addBackNavigation("设置", PAGE_SETTINGS);
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(birdMark(68, 60));
@@ -2554,28 +2704,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addMaintenanceHeader() {
-        FrameLayout top = new FrameLayout(this);
-        Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
-        top.addView(back, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(MIN_TOUCH_DP), Gravity.START | Gravity.CENTER_VERTICAL));
-        LinearLayout brand = new LinearLayout(this);
-        brand.setGravity(Gravity.CENTER);
-        brand.addView(birdMark(58, 48));
-        TextView name = text("雁笺", 24f, COLOR_INK, true);
-        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
-        name.setPadding(dp(8), 0, 0, 0);
-        brand.addView(name);
-        top.addView(brand, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
-        page.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
-        TextView title = text("维护与诊断", 31f, COLOR_INK, true);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
-        title.setGravity(Gravity.CENTER);
-        page.addView(title, matchWrap());
-        TextView subtitle = text("排查问题、迁移配置并安全更新", 14f, COLOR_JADE_DARK, false);
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(2), 0, dp(13));
-        page.addView(subtitle, matchWrap());
+        addSubPageTitle("维护与更新", "排查问题、管理队列并安全更新", PAGE_SETTINGS);
     }
 
     private void addPageTitle(String title, String subtitle, LinearLayout parent) {
@@ -2640,17 +2769,19 @@ public final class MainActivity extends Activity {
     }
 
     private void addSubPageTitle(String title, String subtitle, int backPage) {
-        Button back = secondaryButton("返回设置");
-        back.setCompoundDrawablesWithIntrinsicBounds(icon(MaterialIcons.md_chevron_left, COLOR_JADE_DARK, 20), null, null, null);
-        back.setCompoundDrawablePadding(dp(4));
-        tintCompoundDrawables(back, COLOR_JADE_DARK);
-        back.setOnClickListener(view -> showPage(backPage));
+        String parentLabel = backPage == PAGE_ABOUT ? "关于" : backPage == PAGE_GUARDIAN ? "守护" : "设置";
+        addBackNavigation(parentLabel, backPage);
+        addPageTitle(title, subtitle, page);
+    }
+
+    private void addBackNavigation(String parentLabel, int backPage) {
+        Button back = glassBackButton(parentLabel, () -> showPage(backPage));
+        back.setContentDescription("返回" + parentLabel);
         LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
+                dp(MIN_TOUCH_DP));
         backParams.setMargins(0, 0, 0, dp(10));
         page.addView(back, backParams);
-        addPageTitle(title, subtitle, page);
     }
 
     private void addStatusChip(String value, LinearLayout parent) {

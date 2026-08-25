@@ -15,6 +15,7 @@ final class UiDestination {
     static final int PLATFORM_CAPABILITIES = 11;
     static final int OPEN_SOURCE_LICENSES = 12;
     static final int LOCKSCREEN_TEST = 13;
+    static final int ABOUT = 14;
 
     private UiDestination() {
     }
@@ -24,7 +25,7 @@ final class UiDestination {
                 || destination == MAINTENANCE || destination == HEARTBEAT
                 || destination == PRIVACY || destination == CONFIG_TRANSFER
                 || destination == PLATFORM_CAPABILITIES
-                || destination == OPEN_SOURCE_LICENSES) {
+                || destination == OPEN_SOURCE_LICENSES || destination == ABOUT) {
             return SETTINGS;
         }
         if (destination == ONBOARDING || destination == LOCKSCREEN_TEST) {
@@ -34,6 +35,22 @@ final class UiDestination {
     }
 
     static boolean isValid(int destination) {
-        return destination >= GUARDIAN && destination <= LOCKSCREEN_TEST;
+        return destination >= GUARDIAN && destination <= ABOUT;
+    }
+
+    static int parent(int destination) {
+        if (destination == PLATFORM_CAPABILITIES || destination == OPEN_SOURCE_LICENSES) {
+            return ABOUT;
+        }
+        if (destination == EMAIL || destination == SYSTEM_GUARDIAN
+                || destination == MAINTENANCE || destination == HEARTBEAT
+                || destination == PRIVACY || destination == CONFIG_TRANSFER
+                || destination == ABOUT) {
+            return SETTINGS;
+        }
+        if (destination == ONBOARDING || destination == LOCKSCREEN_TEST) {
+            return GUARDIAN;
+        }
+        return -1;
     }
 }

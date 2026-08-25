@@ -77,6 +77,11 @@ public final class MainActivity extends Activity {
     private static final int PAGE_SYSTEM_GUARDIAN = UiDestination.SYSTEM_GUARDIAN;
     private static final int PAGE_MAINTENANCE = UiDestination.MAINTENANCE;
     private static final int PAGE_ONBOARDING = UiDestination.ONBOARDING;
+    private static final int PAGE_HEARTBEAT = UiDestination.HEARTBEAT;
+    private static final int PAGE_PRIVACY = UiDestination.PRIVACY;
+    private static final int PAGE_CONFIG_TRANSFER = UiDestination.CONFIG_TRANSFER;
+    private static final int PAGE_PLATFORM_CAPABILITIES = UiDestination.PLATFORM_CAPABILITIES;
+    private static final int PAGE_OPEN_SOURCE_LICENSES = UiDestination.OPEN_SOURCE_LICENSES;
 
     private static final int COLOR_INK = Color.rgb(15, 34, 48);
     private static final int COLOR_JADE = Color.rgb(78, 141, 124);
@@ -325,7 +330,10 @@ public final class MainActivity extends Activity {
         page.removeAllViews();
         pageScroll.scrollTo(0, 0);
         int topPadding = 40;
-        if (index == PAGE_SETTINGS || index == PAGE_MAINTENANCE) {
+        if (index == PAGE_SETTINGS || index == PAGE_MAINTENANCE
+                || index == PAGE_HEARTBEAT || index == PAGE_PRIVACY
+                || index == PAGE_CONFIG_TRANSFER || index == PAGE_PLATFORM_CAPABILITIES
+                || index == PAGE_OPEN_SOURCE_LICENSES) {
             topPadding = 22;
         } else if (index == PAGE_SYSTEM_GUARDIAN) {
             topPadding = 38;
@@ -380,6 +388,21 @@ public final class MainActivity extends Activity {
                 break;
             case PAGE_ONBOARDING:
                 showOnboardingPage();
+                break;
+            case PAGE_HEARTBEAT:
+                showHeartbeatPage();
+                break;
+            case PAGE_PRIVACY:
+                showPrivacyPage();
+                break;
+            case PAGE_CONFIG_TRANSFER:
+                showConfigTransferPage();
+                break;
+            case PAGE_PLATFORM_CAPABILITIES:
+                showPlatformCapabilitiesPage();
+                break;
+            case PAGE_OPEN_SOURCE_LICENSES:
+                showOpenSourceLicensesPage();
                 break;
             default:
                 showOverviewPage();
@@ -934,7 +957,7 @@ public final class MainActivity extends Activity {
                 "状态心跳",
                 visualTestMode ? "每 12 小时 · 最近 11:40" : "每 " + TravelGuard.heartbeatHours(this) + " 小时",
                 MaterialCommunityIcons.mdi_pulse,
-                () -> showPage(PAGE_SYSTEM_GUARDIAN)));
+                () -> showPage(PAGE_HEARTBEAT)));
         page.addView(guardian, cardParams());
 
         page.addView(settingsSectionLabel("数据与应用"));
@@ -943,13 +966,13 @@ public final class MainActivity extends Activity {
                 "隐私与安全",
                 "本机加密 · 禁止系统截图",
                 MaterialIcons.md_lock_outline,
-                () -> showPage(PAGE_MAINTENANCE)));
+                () -> showPage(PAGE_PRIVACY)));
         data.addView(hairlineDivider());
         data.addView(settingsRow(
                 "配置迁移",
                 "无密码导入与导出",
                 MaterialIcons.md_swap_horiz,
-                () -> showPage(PAGE_MAINTENANCE)));
+                () -> showPage(PAGE_CONFIG_TRANSFER)));
         data.addView(hairlineDivider());
         data.addView(settingsRow(
                 "维护与诊断",
@@ -960,8 +983,10 @@ public final class MainActivity extends Activity {
 
         LinearLayout links = new LinearLayout(this);
         links.setGravity(Gravity.CENTER);
-        View platform = toolCell(MaterialIcons.md_help_outline, "平台能力说明", () -> showPage(PAGE_MAINTENANCE));
-        View license = toolCell(MaterialIcons.md_code, "开源许可", () -> showPage(PAGE_MAINTENANCE));
+        View platform = toolCell(MaterialIcons.md_help_outline, "平台能力说明",
+                () -> showPage(PAGE_PLATFORM_CAPABILITIES));
+        View license = toolCell(MaterialIcons.md_code, "开源许可",
+                () -> showPage(PAGE_OPEN_SOURCE_LICENSES));
         links.addView(platform, weightedWrap());
         links.addView(license, weightedWrap());
         page.addView(links, matchWrap());
@@ -1025,10 +1050,42 @@ public final class MainActivity extends Activity {
         appSettings.setOnClickListener(view -> openAppSettings());
         page.addView(appSettings, matchWrap());
 
-        LinearLayout heartbeatCard = card();
-        heartbeatCard.addView(sectionHeader(MaterialIcons.md_graphic_eq, "状态心跳"));
+        TextView heartbeat = navigationRow(
+                "状态心跳",
+                "每 " + TravelGuard.heartbeatHours(this) + " 小时 · 单独管理与手动发送",
+                MaterialCommunityIcons.mdi_pulse);
+        heartbeat.setOnClickListener(view -> showPage(PAGE_HEARTBEAT));
+        heartbeat.setBackground(glassSurface(24));
+        applyGlassDepth(heartbeat, 7f, false);
+        page.addView(heartbeat, cardParams());
+
+    }
+
+    private void showHeartbeatPage() {
+        addSubPageTitle("状态心跳", "单独管理离家期间的在线确认与手动自检", PAGE_SETTINGS);
+        DeviceHealth health = DeviceHealth.inspect(this);
         int current = TravelGuard.heartbeatHours(this);
-        Spinner hours = segmentedSpinner(heartbeatCard,
+
+        LinearLayout summary = card();
+        summary.addView(sectionHeader(MaterialCommunityIcons.mdi_pulse, "当前状态"));
+        summary.addView(settingsInlineRow(
+                "发送间隔", "每 " + current + " 小时", MaterialIcons.md_schedule, false));
+        summary.addView(hairlineDivider());
+        String recent = visualTestMode ? "今天 11:40"
+                : health.lastSuccessAt == 0L ? "尚无成功记录"
+                : new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                .format(new Date(health.lastSuccessAt));
+        summary.addView(settingsInlineRow(
+                "最近成功", recent, MaterialIcons.md_verified_user, false));
+        summary.addView(hairlineDivider());
+        summary.addView(settingsInlineRow(
+                "旅行守护", TravelGuard.isEnabled(this) ? "已开启" : "未开启",
+                MaterialCommunityIcons.mdi_shield_outline, false));
+        page.addView(summary, cardParams());
+
+        LinearLayout schedule = card();
+        schedule.addView(sectionHeader(MaterialIcons.md_schedule, "心跳频率"));
+        Spinner hours = segmentedSpinner(schedule,
                 new String[]{"6 小时", "12 小时", "24 小时"},
                 current == 6 ? 0 : current == 24 ? 2 : 1);
         hours.setSelection(current == 6 ? 0 : current == 24 ? 2 : 1);
@@ -1041,18 +1098,142 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
-                // Keep the previously stored interval.
+                // Keep the stored interval.
             }
         });
-        heartbeatCard.addView(text("低电量与断电异常会随心跳提醒", 13f, COLOR_MUTED, false));
-        CheckBox confirmed = new CheckBox(this);
-        confirmed.setText("我已完成华为应用启动管理设置");
-        confirmed.setChecked(visualTestMode || TravelGuard.isBackgroundConfirmed(this));
-        confirmed.setOnCheckedChangeListener((button, checked) -> TravelGuard.setBackgroundConfirmed(this, checked));
-        styleCheckBox(confirmed);
-        heartbeatCard.addView(confirmed);
-        page.addView(heartbeatCard, cardParams());
+        TextView scheduleHint = text(
+                "频率越高，越早发现断网、断电或后台被限制，但会增加少量耗电与邮件数量。",
+                12.5f, COLOR_MUTED, false);
+        scheduleHint.setPadding(dp(4), dp(10), dp(4), dp(2));
+        schedule.addView(scheduleHint, matchWrap());
+        page.addView(schedule, cardParams());
 
+        Button sendNow = actionButton("立即发送一次心跳", COLOR_JADE);
+        sendNow.setOnClickListener(view -> {
+            if (!AppConfig.load(this).enabled) {
+                showToast("请先在守护页启用自动转发");
+                return;
+            }
+            TravelGuard.enqueueHeartbeatNow(this, "设置页手动自检", false);
+            showToast("状态心跳已进入发送队列");
+        });
+        page.addView(sendNow, matchWrap());
+        Button permissions = secondaryButton("查看后台授权状态");
+        permissions.setOnClickListener(view -> showPage(PAGE_SYSTEM_GUARDIAN));
+        page.addView(permissions, matchWrap());
+        addNotice("心跳只能证明 App 当时仍可联网并完成邮件投递，不能替代真实短信与锁屏试投。", page);
+    }
+
+    private void showPrivacyPage() {
+        addSubPageTitle("隐私与安全", "看清短信、授权码和诊断信息如何被保护", PAGE_SETTINGS);
+
+        LinearLayout protections = card();
+        protections.addView(sectionHeader(MaterialIcons.md_lock_outline, "本机保护"));
+        protections.addView(statusRow(MaterialIcons.md_vpn_key,
+                "SMTP 授权码", "Android Keystore 加密", true));
+        protections.addView(statusRow(MaterialCommunityIcons.mdi_message_text_outline,
+                "待发短信与历史", "AES-GCM 加密保存", true));
+        protections.addView(statusRow(MaterialIcons.md_visibility_off,
+                "系统截图", BuildConfig.DEBUG ? "测试包允许视觉验收" : "正式包已禁止", !BuildConfig.DEBUG));
+        protections.addView(statusRow(MaterialIcons.md_share,
+                "诊断报告", "默认移除授权码与正文", true));
+        page.addView(protections, cardParams());
+
+        page.addView(informationCard(
+                MaterialCommunityIcons.mdi_email_outline,
+                "直连邮箱",
+                "短信由手机直接连接你配置的 SMTP 服务器发送，不经过雁笺自建中转服务器。"),
+                cardParams());
+        page.addView(informationCard(
+                MaterialIcons.md_file_upload,
+                "无密码迁移",
+                "导出的配置不会包含 SMTP 授权码；换机导入后必须重新填写密码。"),
+                cardParams());
+
+        Button diagnostics = secondaryButton("生成脱敏诊断报告");
+        diagnostics.setOnClickListener(view -> shareDiagnostics());
+        page.addView(diagnostics, matchWrap());
+        Button emailSettings = secondaryButton("检查邮箱与收件人配置");
+        emailSettings.setOnClickListener(view -> showPage(PAGE_EMAIL));
+        page.addView(emailSettings, matchWrap());
+        addNotice("短信可能包含验证码、账户与个人信息。请只转发到你控制的邮箱，并为邮箱开启独立应用密码。", page);
+    }
+
+    private void showConfigTransferPage() {
+        addSubPageTitle("配置迁移", "导出规则与服务器信息，授权码始终留在原设备", PAGE_SETTINGS);
+
+        page.addView(informationCard(
+                MaterialIcons.md_verified_user,
+                "导出内容已最小化",
+                "包含 SMTP 主机、端口、发件人与收件人、转发规则和守护偏好；不包含授权码与短信正文。"),
+                cardParams());
+
+        LinearLayout actions = groupedCard();
+        actions.addView(settingsRow("导出无密码配置", "保存为 JSON 配置文件",
+                MaterialIcons.md_file_upload, this::exportConfiguration));
+        actions.addView(hairlineDivider());
+        actions.addView(settingsRow("导入配置", "导入后重新填写 SMTP 授权码",
+                MaterialIcons.md_file_download, this::importConfiguration));
+        page.addView(actions, cardParams());
+
+        LinearLayout steps = card();
+        steps.addView(sectionHeader(MaterialIcons.md_swap_horiz, "换机顺序"));
+        steps.addView(statusRow(MaterialIcons.md_file_upload, "1. 原设备导出", "生成无密码文件", true));
+        steps.addView(statusRow(MaterialIcons.md_file_download, "2. 新设备导入", "恢复服务器与规则", true));
+        steps.addView(statusRow(MaterialIcons.md_vpn_key, "3. 重新填写授权码", "再发送测试邮件", false));
+        page.addView(steps, cardParams());
+        addNotice("配置文件仍包含邮箱地址和过滤规则，请使用可信渠道传输并在导入后妥善删除。", page);
+    }
+
+    private void showPlatformCapabilitiesPage() {
+        addSubPageTitle("平台能力说明", "同一设计语言下，不同系统仍受各自权限模型限制", PAGE_SETTINGS);
+
+        page.addView(informationCard(
+                MaterialIcons.md_phone_android,
+                "Android 与兼容 Android 应用的 HarmonyOS",
+                "当前 APK 可在允许安装 Android 应用的系统上运行；实时读取短信需要系统授予短信权限。"),
+                cardParams());
+        page.addView(informationCard(
+                MaterialCommunityIcons.mdi_shield_outline,
+                "锁屏与长期后台",
+                "电池优化、自启动、关联启动和锁屏网络由设备系统控制，App 只能引导设置并通过心跳与试投验证。"),
+                cardParams());
+        page.addView(informationCard(
+                MaterialIcons.md_info_outline,
+                "HarmonyOS NEXT",
+                "HarmonyOS NEXT 不直接运行本 Android APK；需要单独的原生客户端与平台允许的短信能力，当前安装包不宣称支持。"),
+                cardParams());
+        page.addView(informationCard(
+                MaterialCommunityIcons.mdi_email_outline,
+                "邮件链路",
+                "SMTP 直连不依赖第三方中转服务器，但仍受邮箱服务商授权策略、网络与投递延迟影响。"),
+                cardParams());
+    }
+
+    private void showOpenSourceLicensesPage() {
+        addSubPageTitle("开源许可", "查看雁笺使用的主要开源组件与许可边界", PAGE_SETTINGS);
+
+        page.addView(informationCard(
+                MaterialIcons.md_code,
+                "雁笺项目源码",
+                "当前公开仓库尚未声明项目级开源许可证；源代码公开不等同于自动授予复制、修改或再发布权。"),
+                cardParams());
+
+        LinearLayout dependencies = card();
+        dependencies.addView(sectionHeader(MaterialIcons.md_apps, "主要第三方组件"));
+        dependencies.addView(settingsInlineRow(
+                "AndroidX WorkManager", "Apache-2.0", MaterialIcons.md_build, false));
+        dependencies.addView(hairlineDivider());
+        dependencies.addView(settingsInlineRow(
+                "Android Iconify", "Apache-2.0", MaterialIcons.md_palette, false));
+        dependencies.addView(hairlineDivider());
+        dependencies.addView(settingsInlineRow(
+                "RE2/J", "BSD-3-Clause", MaterialIcons.md_filter_list, false));
+        dependencies.addView(hairlineDivider());
+        dependencies.addView(settingsInlineRow(
+                "Android Mail / Activation", "上游双许可证", MaterialCommunityIcons.mdi_email_outline, false));
+        page.addView(dependencies, cardParams());
+        addNotice("依赖的完整许可文本与版权声明以各组件上游发行包为准；正式发布前应补齐项目级 LICENSE 与 NOTICE。", page);
     }
 
     private void showOnboardingPage() {
@@ -1172,15 +1353,6 @@ public final class MainActivity extends Activity {
         privacy.addView(settingsRow("清空本机待发送队列", "当前 " + health.pendingCount + " 条",
                 MaterialIcons.md_delete, this::confirmClearQueue));
         page.addView(privacy, cardParams());
-
-        page.addView(settingsSectionLabelWithIcon("配置迁移", MaterialIcons.md_file_upload));
-        LinearLayout backup = groupedCard();
-        backup.addView(settingsRow("导出无密码配置", "包含服务器、邮箱与规则",
-                MaterialIcons.md_file_upload, this::exportConfiguration));
-        backup.addView(hairlineDivider());
-        backup.addView(settingsRow("导入配置", "导入后需重新填写授权码",
-                MaterialIcons.md_file_download, this::importConfiguration));
-        page.addView(backup, cardParams());
 
         page.addView(settingsSectionLabelWithIcon("版本与更新", MaterialIcons.md_refresh));
         LinearLayout updates = groupedCard();
@@ -2039,6 +2211,16 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    private View informationCard(Icon iconValue, String title, String body) {
+        LinearLayout container = card();
+        container.addView(sectionHeader(iconValue, title));
+        TextView copy = text(body, 13f, COLOR_MUTED, false);
+        copy.setLineSpacing(dp(2), 1f);
+        copy.setPadding(dp(4), dp(5), dp(4), dp(2));
+        container.addView(copy, matchWrap());
+        return container;
+    }
+
     private Spinner segmentedSpinner(LinearLayout parent, String[] values, int selectedIndex) {
         Spinner backing = createSpinner(values);
         backing.setVisibility(View.GONE);
@@ -2254,15 +2436,57 @@ public final class MainActivity extends Activity {
     }
 
     private Spinner createSpinner(String[] values) {
-        Spinner spinner = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                this, android.R.layout.simple_spinner_item, values) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                return spinnerItemView(getItem(position), false, false);
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return spinnerItemView(
+                        getItem(position), true, position == spinner.getSelectedItemPosition());
+            }
+        };
         spinner.setAdapter(adapter);
         spinner.setMinimumHeight(dp(40));
-        spinner.setPadding(dp(10), dp(4), dp(10), dp(4));
+        spinner.setPadding(dp(3), dp(2), dp(3), dp(2));
         spinner.setBackground(insetSurface(18));
+        spinner.setPopupBackgroundDrawable(glassSurface(22));
+        spinner.setDropDownVerticalOffset(dp(7));
+        spinner.setDropDownHorizontalOffset(-dp(2));
+        spinner.setPrompt("请选择");
+        spinner.post(() -> spinner.setDropDownWidth(Math.max(spinner.getWidth() + dp(4), dp(196))));
         applyGlassDepth(spinner, 3f, false);
+        MotionEffects.bindPress(spinner);
         return spinner;
+    }
+
+    private TextView spinnerItemView(String value, boolean dropDown, boolean selected) {
+        TextView item = text(value == null ? "" : value, dropDown ? 13.5f : 13f,
+                selected ? COLOR_JADE_DARK : COLOR_INK, selected);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setMinHeight(dp(dropDown ? 48 : 40));
+        item.setPadding(dp(dropDown ? 15 : 11), dp(dropDown ? 10 : 7),
+                dp(dropDown ? 15 : 9), dp(dropDown ? 10 : 7));
+        item.setCompoundDrawablePadding(dp(9));
+        if (dropDown) {
+            item.setCompoundDrawablesWithIntrinsicBounds(
+                    selected ? icon(MaterialIcons.md_check, COLOR_JADE_DARK, 19) : null,
+                    null, null, null);
+            item.setBackground(selected
+                    ? glassSelection()
+                    : roundRect(Color.TRANSPARENT, 17));
+            if (selected) applyGlassDepth(item, 5f, true);
+            item.setContentDescription((selected ? "已选择，" : "选择，") + value);
+        } else {
+            item.setCompoundDrawablesWithIntrinsicBounds(
+                    null, null, icon(MaterialIcons.md_expand_more, COLOR_JADE_DARK, 21), null);
+            item.setContentDescription("当前选择，" + value + "，双击展开");
+        }
+        return item;
     }
 
     private Spinner securitySpinner(LinearLayout parent) {

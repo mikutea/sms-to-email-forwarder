@@ -27,6 +27,7 @@ final class UpdateChecker {
     private static final String KEY_LAST_AUTOMATIC_ATTEMPT = "last_automatic_attempt";
     private static final long AUTOMATIC_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final int MAX_RESPONSE_BYTES = 512 * 1024;
+    private static final long MAX_APK_BYTES = 100L * 1024L * 1024L;
 
     private UpdateChecker() {
     }
@@ -140,7 +141,31 @@ final class UpdateChecker {
         String title = singleLine(root.optString("name", "雁笺 " + tag), 100);
         String notes = root.optString("body", "").trim();
         if (notes.length() > 4_000) notes = notes.substring(0, 4_000) + "\n…";
-        return new ReleaseInfo(version, title, notes, releaseUrl, prerelease);
+
+        String apkName = "yanjian-v" + version + ".apk";
+        String apkUrl = "";
+        String apkSha256 = "";
+        long apkSize = 0L;
+        JSONArray assets = root.optJSONArray("assets");
+        if (assets != null) {
+            for (int index = 0; index < assets.length(); index++) {
+                JSONObject asset = assets.optJSONObject(index);
+                if (asset == null || !apkName.equals(asset.optString("name", ""))) continue;
+                String candidateUrl = asset.optString("browser_download_url", "").trim();
+                String digest = asset.optString("digest", "").trim().toLowerCase(Locale.ROOT);
+                long size = asset.optLong("size", 0L);
+                if (isOfficialAssetUrl(candidateUrl, tag, apkName)
+                        && digest.matches("sha256:[0-9a-f]{64}")
+                        && size > 0L && size <= MAX_APK_BYTES) {
+                    apkUrl = candidateUrl;
+                    apkSha256 = digest.substring("sha256:".length());
+                    apkSize = size;
+                }
+                break;
+            }
+        }
+        return new ReleaseInfo(version, title, notes, releaseUrl, prerelease,
+                apkName, apkUrl, apkSha256, apkSize);
     }
 
     static boolean isNewer(String remote, String current) {
@@ -215,6 +240,23 @@ final class UpdateChecker {
         }
     }
 
+    static boolean isOfficialAssetUrl(String value, String tag, String name) {
+        try {
+            URI uri = URI.create(value);
+            String expectedPath = "/mikutea/sms-to-email-forwarder/releases/download/"
+                    + tag + "/" + name;
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "github.com".equalsIgnoreCase(uri.getHost())
+                    && uri.getPort() == -1
+                    && uri.getUserInfo() == null
+                    && uri.getQuery() == null
+                    && uri.getFragment() == null
+                    && expectedPath.equals(uri.getRawPath());
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
+    }
+
     private static int[] numericParts(String version) {
         String stable = version.split("[-+]", 2)[0];
         String[] tokens = stable.split("\\.");
@@ -233,7 +275,7 @@ final class UpdateChecker {
         }
     }
 
-    private static String normalizeVersion(String value) {
+    static String normalizeVersion(String value) {
         if (value == null) return "";
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return normalized.startsWith("v") ? normalized.substring(1) : normalized;
@@ -254,14 +296,28 @@ final class UpdateChecker {
         final String notes;
         final String releaseUrl;
         final boolean prerelease;
+        final String apkName;
+        final String apkUrl;
+        final String apkSha256;
+        final long apkSize;
 
         ReleaseInfo(String version, String title, String notes, String releaseUrl,
-                    boolean prerelease) {
+                    boolean prerelease, String apkName, String apkUrl,
+                    String apkSha256, long apkSize) {
             this.version = version;
             this.title = title;
             this.notes = notes;
             this.releaseUrl = releaseUrl;
             this.prerelease = prerelease;
+            this.apkName = apkName;
+            this.apkUrl = apkUrl;
+            this.apkSha256 = apkSha256;
+            this.apkSize = apkSize;
+        }
+
+        boolean hasDownload() {
+            return !apkName.isEmpty() && !apkUrl.isEmpty()
+                    && apkSha256.matches("[0-9a-f]{64}") && apkSize > 0L;
         }
     }
 }

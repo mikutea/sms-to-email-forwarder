@@ -26,4 +26,6 @@ Android 要求同一应用后续更新持续使用同一签名证书。创建正
 5. 生成 APK/证书/SBOM 的 SHA-256、CycloneDX SBOM 和 GitHub 构建来源证明。
 6. 资产上传成功后才创建 GitHub Release；带预发布标识的版本自动标记为 Beta。
 
+应用内更新依赖 GitHub Releases API 为 APK 资产返回 `size`、`digest` 和 `browser_download_url`。APK 文件名必须为 `yanjian-v<version>.apk`，标签、Android `versionName`、资产名和发布下载路径必须完全一致，否则客户端只提供发布页回退而不会自动安装。
+
 用户可以使用 `gh attestation verify <apk> --repo mikutea/sms-to-email-forwarder` 验证构建来源，并使用 `sha256sum -c SHA256SUMS.txt` 验证下载完整性。

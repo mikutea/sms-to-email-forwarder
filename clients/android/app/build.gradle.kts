@@ -21,8 +21,8 @@ android {
         applicationId = "com.server.smsforwarder"
         minSdk = 23
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.0.1-beta.1"
+        versionCode = 10
+        versionName = "1.1.0-beta.1"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -85,6 +85,10 @@ tasks.register("printVersionCode") {
 }
 
 dependencies {
+    // 1.17+ requires compileSdk 36 and AGP 8.9.1; this project intentionally
+    // stays on the tested compileSdk 35 / AGP 8.7.3 compatibility baseline.
+    //noinspection GradleDependency
+    implementation("androidx.core:core:1.16.0")
     implementation("androidx.work:work-runtime:2.11.2")
     implementation("com.joanzapata.iconify:android-iconify-material:2.2.2") {
         exclude(group = "com.android.support")

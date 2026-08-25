@@ -17,6 +17,7 @@ public final class UiDestinationTest {
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.CONFIG_TRANSFER));
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.PLATFORM_CAPABILITIES));
         assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.OPEN_SOURCE_LICENSES));
+        assertEquals(UiDestination.SETTINGS, UiDestination.root(UiDestination.ABOUT));
     }
 
     @Test
@@ -34,9 +35,19 @@ public final class UiDestinationTest {
 
     @Test
     public void validatesDestinationBounds() {
-        assertTrue(UiDestination.isValid(UiDestination.LOCKSCREEN_TEST));
+        assertTrue(UiDestination.isValid(UiDestination.ABOUT));
         assertFalse(UiDestination.isValid(-1));
-        assertFalse(UiDestination.isValid(UiDestination.LOCKSCREEN_TEST + 1));
+        assertFalse(UiDestination.isValid(UiDestination.ABOUT + 1));
+    }
+
+    @Test
+    public void nestedPagesReturnToTheirVisibleParent() {
+        assertEquals(UiDestination.SETTINGS, UiDestination.parent(UiDestination.EMAIL));
+        assertEquals(UiDestination.SETTINGS, UiDestination.parent(UiDestination.ABOUT));
+        assertEquals(UiDestination.ABOUT, UiDestination.parent(UiDestination.PLATFORM_CAPABILITIES));
+        assertEquals(UiDestination.ABOUT, UiDestination.parent(UiDestination.OPEN_SOURCE_LICENSES));
+        assertEquals(UiDestination.GUARDIAN, UiDestination.parent(UiDestination.LOCKSCREEN_TEST));
+        assertEquals(-1, UiDestination.parent(UiDestination.SETTINGS));
     }
 
     @Test
@@ -51,7 +62,8 @@ public final class UiDestinationTest {
                 UiDestination.MAINTENANCE,
                 UiDestination.PLATFORM_CAPABILITIES,
                 UiDestination.OPEN_SOURCE_LICENSES,
-                UiDestination.LOCKSCREEN_TEST
+                UiDestination.LOCKSCREEN_TEST,
+                UiDestination.ABOUT
         };
         for (int left = 0; left < destinations.length; left++) {
             for (int right = left + 1; right < destinations.length; right++) {

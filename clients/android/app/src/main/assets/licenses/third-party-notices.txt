@@ -1,0 +1,23 @@
+雁笺 Android 客户端第三方声明
+
+AndroidX Core 1.16.0
+许可证：Apache-2.0
+上游：https://developer.android.com/jetpack/androidx/releases/core
+
+AndroidX WorkManager 2.11.2
+许可证：Apache-2.0
+上游：https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started
+
+Android Iconify Material / Material Community 2.2.2
+许可证：Apache-2.0
+上游：https://github.com/JoanZapata/android-iconify
+
+RE2/J 1.8
+许可证：BSD-3-Clause
+上游：https://github.com/google/re2j
+
+Android Mail / Activation 1.6.8
+许可证：EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
+上游：https://github.com/eclipse-ee4j/mail
+
+每个组件仍分别遵循其上游许可证；此清单不改变相应许可证的条款。

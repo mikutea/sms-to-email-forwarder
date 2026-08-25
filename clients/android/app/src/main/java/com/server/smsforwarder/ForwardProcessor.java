@@ -21,7 +21,7 @@ final class ForwardProcessor {
         }
         String validationError = config.validateForForwarding();
         if (validationError != null) {
-            AppConfig.setStatus(context, "配置无效，发送已暂停：" + validationError);
+            AppConfig.setSmtpFailure(context, "配置无效，发送已暂停：" + validationError);
             // Saving a valid configuration or enabling forwarding schedules the queue again.
             return new ProcessResult(0, false);
         }
@@ -53,7 +53,7 @@ final class ForwardProcessor {
                         attempts,
                         System.currentTimeMillis() + retryDelay(attempts, authenticationFailure),
                         classified);
-                AppConfig.setStatus(
+                AppConfig.setSmtpFailure(
                         context,
                         classified + "，已保留在加密队列中重试");
             }

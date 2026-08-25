@@ -18,6 +18,9 @@ final class DeviceHealth {
     final boolean smsPermission;
     final boolean forwardingEnabled;
     final boolean smtpValid;
+    final boolean smtpVerified;
+    final boolean smtpFailed;
+    final String smtpLabel;
     final boolean connected;
     final boolean batteryExempt;
     final boolean backgroundConfirmed;
@@ -34,6 +37,9 @@ final class DeviceHealth {
             boolean smsPermission,
             boolean forwardingEnabled,
             boolean smtpValid,
+            boolean smtpVerified,
+            boolean smtpFailed,
+            String smtpLabel,
             boolean connected,
             boolean batteryExempt,
             boolean backgroundConfirmed,
@@ -48,6 +54,9 @@ final class DeviceHealth {
         this.smsPermission = smsPermission;
         this.forwardingEnabled = forwardingEnabled;
         this.smtpValid = smtpValid;
+        this.smtpVerified = smtpVerified;
+        this.smtpFailed = smtpFailed;
+        this.smtpLabel = smtpLabel;
         this.connected = connected;
         this.batteryExempt = batteryExempt;
         this.backgroundConfirmed = backgroundConfirmed;
@@ -65,6 +74,10 @@ final class DeviceHealth {
         AppConfig config = AppConfig.load(context);
         BatterySnapshot battery = readBattery(context);
         NetworkState.Snapshot network = NetworkState.inspect(context);
+        boolean smtpConfigured = config.validateForForwarding() == null;
+        SmtpHealthState smtpState = SmtpHealthState.from(
+                smtpConfigured,
+                AppConfig.getSmtpVerificationState(context));
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         boolean exempt = powerManager != null
                 && powerManager.isIgnoringBatteryOptimizations(context.getPackageName());
@@ -72,7 +85,10 @@ final class DeviceHealth {
                 context.checkSelfPermission(Manifest.permission.RECEIVE_SMS)
                         == PackageManager.PERMISSION_GRANTED,
                 config.enabled,
-                config.validateForForwarding() == null,
+                smtpConfigured,
+                smtpState.verified,
+                smtpState.failed,
+                smtpState.label,
                 network.usableForBackground,
                 exempt,
                 TravelGuard.isBackgroundConfirmed(context),
@@ -94,7 +110,11 @@ final class DeviceHealth {
         List<String> blockers = new ArrayList<>();
         if (!smsPermission) blockers.add("允许接收短信");
         if (!forwardingEnabled) blockers.add("启用自动转发");
-        if (!smtpValid) blockers.add("完成并测试 SMTP 配置");
+        if (!smtpValid) {
+            blockers.add("完成 SMTP 配置");
+        } else if (!smtpVerified) {
+            blockers.add(smtpFailed ? "修复并重新测试 SMTP" : "测试并验证 SMTP");
+        }
         if (!batteryExempt) blockers.add("允许忽略电池优化");
         if (!backgroundConfirmed) blockers.add("确认厂商后台启动设置");
         if (lastSmsForwardedAt <= 0L) blockers.add("完成一次真实短信闭环测试");
@@ -112,7 +132,7 @@ final class DeviceHealth {
                         .format(new Date(lastSmsForwardedAt));
         return "短信权限：" + yesNo(smsPermission)
                 + "\n自动转发：" + yesNo(forwardingEnabled)
-                + "\nSMTP 配置：" + yesNo(smtpValid)
+                + "\nSMTP 状态：" + smtpLabel
                 + "\n网络：" + networkLabel
                 + "\n电量：" + (batteryPercent < 0 ? "未知" : batteryPercent + "%")
                 + (charging ? "（充电中）" : "（未充电）")

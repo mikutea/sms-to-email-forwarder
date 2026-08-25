@@ -112,6 +112,7 @@ final class ConfigBackup {
         TravelGuard.setHeartbeatHours(context, heartbeatHours);
         TravelGuard.setEnabled(context, false);
         TravelGuard.setBackgroundConfirmed(context, false);
+        AppConfig.resetSmtpVerification(context);
         AppConfig.setStatus(context, "配置已导入；授权码、隐私确认和后台确认需要重新填写");
     }
 

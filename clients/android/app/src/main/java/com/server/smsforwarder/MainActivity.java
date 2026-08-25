@@ -121,6 +121,7 @@ public final class MainActivity extends Activity {
     private int currentPage;
     private boolean enableAfterPermission;
     private boolean visualTestMode;
+    private boolean visualTestSmtpFailure;
     private boolean firstResume = true;
     private boolean awaitingInstallPermission;
     private boolean awaitingVendorSettingsReturn;
@@ -167,6 +168,8 @@ public final class MainActivity extends Activity {
         Iconify.with(new MaterialCommunityModule());
         visualTestMode = BuildConfig.DEBUG
                 && getIntent().getBooleanExtra("visual_test_mode", false);
+        visualTestSmtpFailure = visualTestMode
+                && getIntent().getBooleanExtra("visual_test_smtp_failure", false);
         // Keep user content out of screenshots in distributable builds while allowing
         // emulator screenshot comparison and automated visual QA for debug builds.
         if (!BuildConfig.DEBUG) {
@@ -531,8 +534,9 @@ public final class MainActivity extends Activity {
     private void showOverviewPage() {
         DeviceHealth health = DeviceHealth.inspect(this);
         boolean guardEnabled = TravelGuard.isEnabled(this);
-        boolean displayReady = visualTestMode || health.readyForTravel();
+        boolean displayReady = visualTestMode ? !visualTestSmtpFailure : health.readyForTravel();
         boolean displayGuardEnabled = visualTestMode || guardEnabled;
+        boolean displaySmtpFailure = visualTestSmtpFailure || health.smtpFailed;
         addGuardianHeader();
 
         LinearLayout statusCard = card();
@@ -545,12 +549,14 @@ public final class MainActivity extends Activity {
         LinearLayout heroCopy = new LinearLayout(this);
         heroCopy.setOrientation(LinearLayout.VERTICAL);
         heroCopy.setPadding(dp(17), 0, 0, 0);
-        heroCopy.addView(text(
-                displayReady && displayGuardEnabled ? "守护运行中" : "守护待设置",
-                23f, statusColor, true));
+        String guardianHeadline = displayReady && displayGuardEnabled
+                ? "守护运行中"
+                : displayGuardEnabled && displaySmtpFailure ? "守护需处理" : "守护待设置";
+        heroCopy.addView(text(guardianHeadline, 23f, statusColor, true));
         String heartbeat = AppConfig.getLastStatus(this);
-        heroCopy.addView(text(visualTestMode
-                ? "最近心跳 11:40 · 下一次约 23:40"
+        heroCopy.addView(text(displaySmtpFailure
+                ? "最近一次 SMTP 验证失败 · 点按查看原因"
+                : visualTestMode ? "最近心跳 11:40 · 下一次约 23:40"
                 : heartbeat == null || heartbeat.isBlank()
                 ? "最近心跳 尚无记录 · 下一次待设置"
                 : heartbeat, 12.5f, COLOR_MUTED, false));
@@ -562,9 +568,27 @@ public final class MainActivity extends Activity {
         readiness.setBackground(roundStroke(Color.argb(214, 246, 249, 248), Color.WHITE, 22));
         readiness.addView(readinessCell(MaterialCommunityIcons.mdi_message_text_outline, "短信权限", visualTestMode || health.smsPermission ? "已授权" : "未授权", visualTestMode || health.smsPermission), weightedWrap());
         readiness.addView(readinessCell(MaterialCommunityIcons.mdi_cellphone, "后台运行", visualTestMode || (health.batteryExempt && health.backgroundConfirmed) ? "已允许" : "待完成", visualTestMode || (health.batteryExempt && health.backgroundConfirmed)), weightedWrap());
-        readiness.addView(readinessCell(MaterialCommunityIcons.mdi_email_outline, "SMTP", visualTestMode || health.smtpValid ? "已连接" : "待配置", visualTestMode || health.smtpValid), weightedWrap());
+        String smtpReadinessLabel = visualTestSmtpFailure
+                ? "验证失败" : visualTestMode ? "已验证" : health.smtpLabel;
+        readiness.addView(readinessCell(
+                MaterialCommunityIcons.mdi_email_outline,
+                "SMTP",
+                smtpReadinessLabel,
+                visualTestMode ? !visualTestSmtpFailure : health.smtpVerified), weightedWrap());
         readiness.addView(readinessCell(MaterialCommunityIcons.mdi_shield_outline, "真实短信", visualTestMode || health.lastSmsForwardedAt > 0L ? "已验证" : "待验证", visualTestMode || health.lastSmsForwardedAt > 0L), weightedWrap());
         statusCard.addView(readiness, matchWrap());
+        if (displaySmtpFailure) {
+            statusCard.setClickable(true);
+            statusCard.setFocusable(true);
+            statusCard.setContentDescription("SMTP 验证失败，点按查看原因");
+            statusCard.setOnClickListener(view -> showGlassDialog(
+                    "SMTP 验证失败",
+                    visualTestSmtpFailure
+                            ? "主通道测试失败：SMTP 服务器在会话中提前断开（诊断码 CONNECTION-CLOSED）\n\n建议先尝试 587 + STARTTLS，并检查 VPN、私人 DNS 和运营商端口限制。"
+                            : AppConfig.getLastStatus(this),
+                    "前往邮箱", () -> showPage(PAGE_EMAIL), "稍后处理"));
+            MotionEffects.bindPress(statusCard);
+        }
         page.addView(statusCard, cardParams());
 
         AppConfig config = AppConfig.load(this);
@@ -656,6 +680,7 @@ public final class MainActivity extends Activity {
 
     private void showEmailPage() {
         AppConfig config = AppConfig.load(this);
+        DeviceHealth health = DeviceHealth.inspect(this);
         addEmailHeader();
 
         LinearLayout channelTabs = new LinearLayout(this);
@@ -762,9 +787,18 @@ public final class MainActivity extends Activity {
         connectionState.setGravity(Gravity.CENTER_VERTICAL);
         connectionState.setPadding(dp(10), 0, dp(10), 0);
         ImageView pulse = new ImageView(this);
-        pulse.setImageDrawable(icon(MaterialCommunityIcons.mdi_pulse, COLOR_JADE, 22));
+        boolean displaySmtpVerified = visualTestMode ? !visualTestSmtpFailure : health.smtpVerified;
+        boolean displaySmtpFailed = visualTestSmtpFailure || health.smtpFailed;
+        int smtpStateColor = displaySmtpVerified
+                ? COLOR_JADE : displaySmtpFailed ? COLOR_CINNABAR : COLOR_AMBER;
+        pulse.setImageDrawable(icon(MaterialCommunityIcons.mdi_pulse, smtpStateColor, 22));
         connectionState.addView(pulse, new LinearLayout.LayoutParams(dp(28), dp(28)));
-        TextView state = text("连接状态   未测试", 12.5f, COLOR_MUTED, false);
+        TextView state = text(
+                "验证状态   " + (visualTestSmtpFailure
+                        ? "验证失败" : visualTestMode ? "已验证" : health.smtpLabel),
+                12.5f,
+                smtpStateColor,
+                false);
         state.setPadding(dp(8), 0, 0, 0);
         connectionState.addView(state, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Button testPrimary = secondaryButton("测试主通道");
@@ -1109,7 +1143,11 @@ public final class MainActivity extends Activity {
         LinearLayout forwarding = groupedCard();
         forwarding.addView(settingsRow(
                 "邮箱通道",
-                visualTestMode || config.primaryProfile().validate() == null ? "主通道已连接 · 备用通道已启用" : "等待完成配置",
+                visualTestMode
+                        ? "SMTP 已验证 · 备用通道已启用"
+                        : !health.smtpValid
+                        ? "等待完成配置"
+                        : "SMTP " + health.smtpLabel + (config.backupEnabled ? " · 备用通道已启用" : ""),
                 MaterialCommunityIcons.mdi_email_outline,
                 () -> showPage(PAGE_EMAIL)));
         forwarding.addView(hairlineDivider());
@@ -1584,7 +1622,7 @@ public final class MainActivity extends Activity {
         page.addView(subtitle);
 
         DeviceHealth health = DeviceHealth.inspect(this);
-        boolean forwardingReady = visualTestMode || (health.forwardingEnabled && health.smtpValid);
+        boolean forwardingReady = visualTestMode || (health.forwardingEnabled && health.smtpVerified);
         boolean smsReceived = visualTestMode || health.lastSmsReceivedAt > 0L;
         boolean smsForwarded = visualTestMode || health.lastSmsForwardedAt > 0L;
 
@@ -1650,7 +1688,7 @@ public final class MainActivity extends Activity {
                 : new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(health.lastSuccessAt));
         status.addView(statColumn("最近心跳", recentSuccess));
         status.addView(statDivider());
-        status.addView(statColumn("SMTP", visualTestMode || health.smtpValid ? "已连接" : "待配置"));
+        status.addView(statColumn("SMTP", visualTestMode ? "已验证" : health.smtpLabel));
         page.addView(status, cardParams());
 
         Button diagnostics = secondaryButton("查看完整诊断");
@@ -1829,6 +1867,7 @@ public final class MainActivity extends Activity {
                 backup.fromAddress, backup.recipientsText,
                 strategyValue(dispatchStrategy.getSelectedItemPosition()),
                 old.senderAllowlist, old.skipOtp, true, old.enabled);
+        AppConfig.resetSmtpVerification(this);
         showToast("邮箱配置已保存");
         return true;
     }
@@ -1871,13 +1910,13 @@ public final class MainActivity extends Activity {
             if (success) {
                 AppConfig.setSuccess(this, result);
             } else {
-                AppConfig.setStatus(this, result);
+                AppConfig.setSmtpFailure(this, result);
             }
             String message = result;
             runOnUiThread(() -> {
                 showToast(message);
-                if (currentPage == 0) {
-                    showPage(PAGE_GUARDIAN);
+                if (currentPage == PAGE_GUARDIAN || currentPage == PAGE_EMAIL) {
+                    showPage(currentPage);
                 }
             });
         });
@@ -2053,7 +2092,7 @@ public final class MainActivity extends Activity {
             requestSmsPermission(false);
         } else if (!health.forwardingEnabled) {
             requestEnableForwarding();
-        } else if (!health.smtpValid) {
+        } else if (!health.smtpVerified) {
             showPage(PAGE_EMAIL);
         } else if (!health.batteryExempt) {
             requestBatteryExemption();

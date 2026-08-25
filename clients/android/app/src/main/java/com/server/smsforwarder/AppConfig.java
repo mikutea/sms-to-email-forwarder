@@ -34,6 +34,7 @@ final class AppConfig {
     private static final String KEY_LAST_STATUS = "last_status";
     private static final String KEY_LAST_STATUS_AT = "last_status_at";
     private static final String KEY_LAST_SUCCESS_AT = "last_success_at";
+    private static final String KEY_SMTP_VERIFICATION_STATE = "smtp_verification_state";
     private static final String KEY_LAST_SMS_RECEIVED_AT = "last_sms_received_at";
     private static final String KEY_LAST_SMS_FORWARDED_AT = "last_sms_forwarded_at";
 
@@ -276,6 +277,21 @@ final class AppConfig {
                 .putString(KEY_LAST_STATUS, status)
                 .putLong(KEY_LAST_STATUS_AT, System.currentTimeMillis())
                 .putLong(KEY_LAST_SUCCESS_AT, System.currentTimeMillis())
+                .putString(KEY_SMTP_VERIFICATION_STATE, SmtpHealthState.VERIFIED)
+                .apply();
+    }
+
+    static void setSmtpFailure(Context context, String status) {
+        prefs(context).edit()
+                .putString(KEY_LAST_STATUS, status)
+                .putLong(KEY_LAST_STATUS_AT, System.currentTimeMillis())
+                .putString(KEY_SMTP_VERIFICATION_STATE, SmtpHealthState.FAILED)
+                .apply();
+    }
+
+    static void resetSmtpVerification(Context context) {
+        prefs(context).edit()
+                .putString(KEY_SMTP_VERIFICATION_STATE, SmtpHealthState.UNKNOWN)
                 .apply();
     }
 
@@ -297,6 +313,20 @@ final class AppConfig {
 
     static long getLastSuccessAt(Context context) {
         return prefs(context).getLong(KEY_LAST_SUCCESS_AT, 0L);
+    }
+
+    static String getSmtpVerificationState(Context context) {
+        SharedPreferences prefs = prefs(context);
+        String stored = prefs.getString(KEY_SMTP_VERIFICATION_STATE, null);
+        if (SmtpHealthState.UNKNOWN.equals(stored)
+                || SmtpHealthState.VERIFIED.equals(stored)
+                || SmtpHealthState.FAILED.equals(stored)) {
+            return stored;
+        }
+        return SmtpHealthState.inferLegacy(
+                prefs.getLong(KEY_LAST_SUCCESS_AT, 0L),
+                prefs.getLong(KEY_LAST_STATUS_AT, 0L),
+                prefs.getString(KEY_LAST_STATUS, ""));
     }
 
     static void setSmsReceived(Context context, long receivedAt) {

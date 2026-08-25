@@ -12,18 +12,24 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.transition.AutoTransition;
 import android.transition.TransitionManager;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
+import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -36,8 +42,11 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.joanzapata.iconify.Icon;
 import com.joanzapata.iconify.IconDrawable;
 import com.joanzapata.iconify.Iconify;
+import com.joanzapata.iconify.fonts.MaterialCommunityIcons;
+import com.joanzapata.iconify.fonts.MaterialCommunityModule;
 import com.joanzapata.iconify.fonts.MaterialIcons;
 import com.joanzapata.iconify.fonts.MaterialModule;
 
@@ -69,18 +78,20 @@ public final class MainActivity extends Activity {
     private static final int PAGE_MAINTENANCE = UiDestination.MAINTENANCE;
     private static final int PAGE_ONBOARDING = UiDestination.ONBOARDING;
 
-    private static final int COLOR_INK = Color.rgb(20, 35, 43);
+    private static final int COLOR_INK = Color.rgb(15, 34, 48);
     private static final int COLOR_JADE = Color.rgb(78, 141, 124);
-    private static final int COLOR_JADE_DARK = Color.rgb(39, 104, 89);
-    private static final int COLOR_JADE_SOFT = Color.rgb(184, 216, 207);
+    private static final int COLOR_JADE_DARK = Color.rgb(28, 119, 104);
+    private static final int COLOR_JADE_SOFT = Color.rgb(186, 224, 216);
     private static final int COLOR_CINNABAR = Color.rgb(201, 75, 61);
-    private static final int COLOR_AMBER = Color.rgb(205, 132, 31);
-    private static final int COLOR_PAPER = Color.rgb(244, 247, 246);
-    private static final int COLOR_CARD = Color.rgb(249, 251, 250);
-    private static final int COLOR_INSET = Color.rgb(237, 243, 241);
+    private static final int COLOR_AMBER = Color.rgb(226, 137, 15);
+    private static final int COLOR_PAPER = Color.rgb(248, 249, 248);
+    private static final int COLOR_CARD = Color.rgb(252, 253, 252);
+    private static final int COLOR_INSET = Color.rgb(240, 246, 244);
     private static final int COLOR_GLASS = Color.argb(224, 252, 253, 253);
     private static final int COLOR_GLASS_BORDER = Color.rgb(220, 234, 230);
-    private static final int COLOR_MUTED = Color.rgb(93, 108, 116);
+    private static final int COLOR_MUTED = Color.rgb(94, 111, 126);
+    private static final float UI_SCALE = 0.92f;
+    private static final float TEXT_SCALE = 0.93f;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private LinearLayout page;
@@ -89,6 +100,8 @@ public final class MainActivity extends Activity {
     private int currentPage;
     private boolean enableAfterPermission;
     private boolean updateDialogShowing;
+    private boolean visualTestMode;
+    private boolean firstResume = true;
     private int historyFilter;
 
     private EditText primaryHost;
@@ -98,7 +111,7 @@ public final class MainActivity extends Activity {
     private EditText primaryPassword;
     private EditText primaryFrom;
     private EditText primaryRecipients;
-    private CheckBox backupEnabled;
+    private Switch backupEnabled;
     private LinearLayout backupFields;
     private EditText backupHost;
     private EditText backupPort;
@@ -119,7 +132,7 @@ public final class MainActivity extends Activity {
     private EditText bodyExclude;
     private EditText bodyRegex;
     private CheckBox includeAll;
-    private CheckBox scheduleEnabled;
+    private Switch scheduleEnabled;
     private EditText scheduleStart;
     private EditText scheduleEnd;
     private CheckBox[] weekdays;
@@ -128,6 +141,9 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Iconify.with(new MaterialModule());
+        Iconify.with(new MaterialCommunityModule());
+        visualTestMode = BuildConfig.DEBUG
+                && getIntent().getBooleanExtra("visual_test_mode", false);
         // Keep user content out of screenshots in distributable builds while allowing
         // emulator screenshot comparison and automated visual QA for debug builds.
         if (!BuildConfig.DEBUG) {
@@ -135,16 +151,55 @@ public final class MainActivity extends Activity {
         }
         getWindow().setStatusBarColor(COLOR_PAPER);
         getWindow().setNavigationBarColor(COLOR_PAPER);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         setContentView(buildShell());
-        showPage(PAGE_GUARDIAN);
+        // The decor view is attached by setContentView. Calling the API 30+
+        // insets controller before that point crashes on some platform builds.
+        applyImmersiveCanvas();
+        int initialPage = PAGE_GUARDIAN;
+        if (visualTestMode) {
+            int requestedPage = getIntent().getIntExtra("visual_test_destination", PAGE_GUARDIAN);
+            if (UiDestination.isValid(requestedPage)) {
+                initialPage = requestedPage;
+            }
+        }
+        showPage(initialPage);
         checkForUpdates(false);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            applyImmersiveCanvas();
+        }
+    }
+
+    private void applyImmersiveCanvas() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (page != null) {
+        if (firstResume) {
+            firstResume = false;
+        } else if (page != null) {
             showPage(currentPage);
         }
     }
@@ -201,9 +256,9 @@ public final class MainActivity extends Activity {
     private View buildShell() {
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setBackgroundColor(COLOR_PAPER);
+        shell.setBackground(paperSurface());
         shell.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            view.setPadding(0, 0, 0, 0);
             return insets;
         });
 
@@ -213,7 +268,7 @@ public final class MainActivity extends Activity {
         pageScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(24), dp(18), dp(24), dp(26));
+        page.setPadding(dp(24), dp(24), dp(24), dp(18));
         pageScroll.addView(page, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -224,30 +279,30 @@ public final class MainActivity extends Activity {
 
         navigation = new LinearLayout(this);
         navigation.setGravity(Gravity.CENTER);
-        navigation.setPadding(dp(5), dp(5), dp(5), dp(5));
-        navigation.setBackground(roundStroke(Color.argb(246, 251, 253, 252), Color.WHITE, 32));
-        navigation.setElevation(dp(12));
-        addNavigationButton("记录", MaterialIcons.md_list, PAGE_HISTORY);
-        addNavigationButton("规则", MaterialIcons.md_filter_list, PAGE_RULES);
-        addNavigationButton("守护", MaterialIcons.md_verified_user, PAGE_GUARDIAN);
-        addNavigationButton("设置", MaterialIcons.md_settings, PAGE_SETTINGS);
+        navigation.setPadding(dp(5), dp(4), dp(5), dp(4));
+        navigation.setBackground(glassSurface(32));
+        applyGlassDepth(navigation, 18f, true);
+        addNavigationButton("记录", MaterialCommunityIcons.mdi_file_document, PAGE_HISTORY);
+        addNavigationButton("规则", MaterialCommunityIcons.mdi_filter_outline, PAGE_RULES);
+        addNavigationButton("守护", MaterialCommunityIcons.mdi_shield_outline, PAGE_GUARDIAN);
+        addNavigationButton("设置", MaterialCommunityIcons.mdi_settings, PAGE_SETTINGS);
         LinearLayout.LayoutParams navParams = matchWrap();
-        navParams.setMargins(dp(18), dp(6), dp(18), dp(12));
+        navParams.setMargins(dp(18), dp(6), dp(18), dp(9));
         shell.addView(navigation, navParams);
         return shell;
     }
 
-    private void addNavigationButton(String label, MaterialIcons iconValue, int pageIndex) {
+    private void addNavigationButton(String label, Icon iconValue, int pageIndex) {
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER);
         item.setTag(pageIndex);
-        item.setPadding(dp(6), dp(6), dp(6), dp(5));
+        item.setPadding(dp(6), dp(4), dp(6), dp(3));
         ImageView icon = new ImageView(this);
         icon.setTag("icon");
-        icon.setImageDrawable(icon(iconValue, COLOR_MUTED, 25));
-        item.addView(icon, new LinearLayout.LayoutParams(dp(27), dp(27)));
-        TextView labelView = text(label, 12f, COLOR_MUTED, false);
+        icon.setImageDrawable(icon(iconValue, COLOR_MUTED, 23));
+        item.addView(icon, new LinearLayout.LayoutParams(dp(25), dp(25)));
+        TextView labelView = text(label, 11.5f, COLOR_MUTED, false);
         labelView.setTag("label");
         labelView.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
@@ -261,7 +316,7 @@ public final class MainActivity extends Activity {
         MotionEffects.bindPress(item);
         navigation.addView(item, new LinearLayout.LayoutParams(
                 0,
-                dp(66),
+                dp(58),
                 1f));
     }
 
@@ -269,6 +324,21 @@ public final class MainActivity extends Activity {
         currentPage = index;
         page.removeAllViews();
         pageScroll.scrollTo(0, 0);
+        int topPadding = 40;
+        if (index == PAGE_SETTINGS || index == PAGE_MAINTENANCE) {
+            topPadding = 22;
+        } else if (index == PAGE_SYSTEM_GUARDIAN) {
+            topPadding = 38;
+        } else if (index == PAGE_ONBOARDING) {
+            topPadding = 45;
+        } else if (index == PAGE_RULES) {
+            topPadding = 45;
+        } else if (index == PAGE_EMAIL) {
+            topPadding = 34;
+        } else if (index == PAGE_HISTORY) {
+            topPadding = 37;
+        }
+        page.setPadding(dp(29), dp(topPadding), dp(29), dp(18));
         int selectedRoot = rootPage(index);
         for (int i = 0; i < navigation.getChildCount(); i++) {
             LinearLayout item = (LinearLayout) navigation.getChildAt(i);
@@ -281,6 +351,11 @@ public final class MainActivity extends Activity {
             item.setBackground(selected
                     ? glassSelection()
                     : roundRect(Color.TRANSPARENT, 24));
+            if (selected) {
+                applyGlassDepth(item, 8f, true);
+            } else {
+                item.setElevation(0f);
+            }
             item.setSelected(selected);
             MotionEffects.select(item, selected, dp(2));
         }
@@ -310,7 +385,7 @@ public final class MainActivity extends Activity {
                 showOverviewPage();
                 break;
         }
-        MotionEffects.enterPage(pageScroll, dp(12));
+        MotionEffects.enterPage(page, dp(10));
     }
 
     private static int rootPage(int pageIndex) {
@@ -320,11 +395,13 @@ public final class MainActivity extends Activity {
     private void showOverviewPage() {
         DeviceHealth health = DeviceHealth.inspect(this);
         boolean guardEnabled = TravelGuard.isEnabled(this);
+        boolean displayReady = visualTestMode || health.readyForTravel();
+        boolean displayGuardEnabled = visualTestMode || guardEnabled;
         addGuardianHeader();
 
         LinearLayout statusCard = card();
-        int statusColor = health.readyForTravel() ? COLOR_JADE
-                : guardEnabled ? COLOR_CINNABAR : COLOR_AMBER;
+        int statusColor = displayReady ? COLOR_JADE
+                : displayGuardEnabled ? COLOR_CINNABAR : COLOR_AMBER;
         LinearLayout hero = new LinearLayout(this);
         hero.setGravity(Gravity.CENTER_VERTICAL);
         hero.setPadding(dp(4), dp(2), dp(4), dp(15));
@@ -333,10 +410,12 @@ public final class MainActivity extends Activity {
         heroCopy.setOrientation(LinearLayout.VERTICAL);
         heroCopy.setPadding(dp(17), 0, 0, 0);
         heroCopy.addView(text(
-                health.readyForTravel() && guardEnabled ? "守护运行中" : "守护待设置",
+                displayReady && displayGuardEnabled ? "守护运行中" : "守护待设置",
                 23f, statusColor, true));
         String heartbeat = AppConfig.getLastStatus(this);
-        heroCopy.addView(text(heartbeat == null || heartbeat.isBlank()
+        heroCopy.addView(text(visualTestMode
+                ? "最近心跳 11:40 · 下一次约 23:40"
+                : heartbeat == null || heartbeat.isBlank()
                 ? "最近心跳 尚无记录 · 下一次待设置"
                 : heartbeat, 12.5f, COLOR_MUTED, false));
         hero.addView(heroCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -345,17 +424,19 @@ public final class MainActivity extends Activity {
         LinearLayout readiness = new LinearLayout(this);
         readiness.setPadding(dp(3), dp(7), dp(3), dp(7));
         readiness.setBackground(roundStroke(Color.argb(214, 246, 249, 248), Color.WHITE, 22));
-        readiness.addView(readinessCell(MaterialIcons.md_message, "短信权限", health.smsPermission ? "已授权" : "未授权", health.smsPermission), weightedWrap());
-        readiness.addView(readinessCell(MaterialIcons.md_phone_android, "后台运行", health.batteryExempt && health.backgroundConfirmed ? "已允许" : "待完成", health.batteryExempt && health.backgroundConfirmed), weightedWrap());
-        readiness.addView(readinessCell(MaterialIcons.md_email, "SMTP", health.smtpValid ? "已连接" : "待配置", health.smtpValid), weightedWrap());
-        readiness.addView(readinessCell(MaterialIcons.md_verified_user, "真实短信", health.lastSmsForwardedAt > 0L ? "已验证" : "待验证", health.lastSmsForwardedAt > 0L), weightedWrap());
+        readiness.addView(readinessCell(MaterialCommunityIcons.mdi_message_text_outline, "短信权限", visualTestMode || health.smsPermission ? "已授权" : "未授权", visualTestMode || health.smsPermission), weightedWrap());
+        readiness.addView(readinessCell(MaterialCommunityIcons.mdi_cellphone, "后台运行", visualTestMode || (health.batteryExempt && health.backgroundConfirmed) ? "已允许" : "待完成", visualTestMode || (health.batteryExempt && health.backgroundConfirmed)), weightedWrap());
+        readiness.addView(readinessCell(MaterialCommunityIcons.mdi_email_outline, "SMTP", visualTestMode || health.smtpValid ? "已连接" : "待配置", visualTestMode || health.smtpValid), weightedWrap());
+        readiness.addView(readinessCell(MaterialCommunityIcons.mdi_shield_outline, "真实短信", visualTestMode || health.lastSmsForwardedAt > 0L ? "已验证" : "待验证", visualTestMode || health.lastSmsForwardedAt > 0L), weightedWrap());
         statusCard.addView(readiness, matchWrap());
         page.addView(statusCard, cardParams());
 
         AppConfig config = AppConfig.load(this);
-        Button forwarding = actionButton(config.enabled ? "暂停自动转发" : "启用自动转发", COLOR_JADE);
+        Button forwarding = actionButton(config.enabled || visualTestMode ? "暂停自动转发" : "启用自动转发", COLOR_JADE);
         forwarding.setOnClickListener(view -> {
-            if (config.enabled) {
+            if (visualTestMode) {
+                showToast("视觉测试状态不会修改真实转发开关");
+            } else if (config.enabled) {
                 AppConfig.setEnabled(this, false);
                 AppConfig.setStatus(this, "自动转发已由用户暂停");
                 showPage(PAGE_GUARDIAN);
@@ -371,16 +452,16 @@ public final class MainActivity extends Activity {
         guardRow.setOrientation(LinearLayout.HORIZONTAL);
         guardRow.setGravity(Gravity.CENTER_VERTICAL);
         ImageView guardIcon = new ImageView(this);
-        guardIcon.setImageDrawable(icon(MaterialIcons.md_security, COLOR_JADE, 28));
+        guardIcon.setImageDrawable(icon(MaterialCommunityIcons.mdi_shield_outline, COLOR_JADE, 28));
         guardRow.addView(guardIcon, new LinearLayout.LayoutParams(dp(34), dp(34)));
         TextView guardText = text("旅行守护", 16f, COLOR_INK, false);
         guardText.setPadding(dp(12), 0, 0, 0);
         guardRow.addView(guardText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView guardState = text(guardEnabled ? "已开启" : "未开启", 13f,
-                guardEnabled ? COLOR_JADE_DARK : COLOR_MUTED, true);
+        TextView guardState = text(displayGuardEnabled ? "已开启" : "未开启", 13f,
+                displayGuardEnabled ? COLOR_JADE_DARK : COLOR_MUTED, true);
         guardRow.addView(guardState);
         Switch guardSwitch = new Switch(this);
-        guardSwitch.setChecked(guardEnabled);
+        guardSwitch.setChecked(displayGuardEnabled);
         guardSwitch.setContentDescription("旅行守护开关");
         guardSwitch.setButtonTintList(ColorStateList.valueOf(COLOR_JADE));
         guardSwitch.setOnCheckedChangeListener((button, checked) -> toggleTravelGuard());
@@ -390,9 +471,9 @@ public final class MainActivity extends Activity {
         LinearLayout tools = card();
         LinearLayout toolRow = new LinearLayout(this);
         toolRow.setGravity(Gravity.CENTER);
-        View test = toolCell(MaterialIcons.md_send, "测试邮件", () -> testConfiguredProfile(false));
+        View test = toolCell(MaterialCommunityIcons.mdi_send, "测试邮件", () -> testConfiguredProfile(false));
         toolRow.addView(test, weightedWrap());
-        View heartbeatAction = toolCell(MaterialIcons.md_favorite, "发送心跳", () -> {
+        View heartbeatAction = toolCell(MaterialCommunityIcons.mdi_pulse, "发送心跳", () -> {
             if (!AppConfig.load(this).enabled) {
                 showToast("请先启用自动转发");
                 return;
@@ -402,86 +483,171 @@ public final class MainActivity extends Activity {
             showPage(PAGE_GUARDIAN);
         });
         toolRow.addView(heartbeatAction, weightedWrap());
-        View retry = toolCell(MaterialIcons.md_refresh, "重试队列", () -> {
+        View retry = toolCell(MaterialCommunityIcons.mdi_refresh, "重试队列", () -> {
             ForwardScheduler.schedule(this);
             showToast("已请求立即重试");
         });
         toolRow.addView(retry, weightedWrap());
         tools.addView(toolRow, matchWrap());
-        TextView queue = navigationRow("队列状态", "待发 " + health.pendingCount + " 条", MaterialIcons.md_inbox);
-        queue.setOnClickListener(view -> showPage(PAGE_HISTORY));
-        tools.addView(queue, matchWrap());
         page.addView(tools, cardParams());
+
+        TextView queue = navigationRow("队列状态", "待发 " + health.pendingCount + " 条", MaterialCommunityIcons.mdi_inbox);
+        queue.setOnClickListener(view -> showPage(PAGE_HISTORY));
+        queue.setBackground(glassSurface(24));
+        applyGlassDepth(queue, 7f, false);
+        page.addView(queue, cardParams());
 
         TextView networkTip = text("持续充电并保持 Wi-Fi 或移动网络可用", 13f, COLOR_MUTED, false);
         networkTip.setGravity(Gravity.CENTER);
         networkTip.setCompoundDrawablePadding(dp(8));
-        networkTip.setCompoundDrawablesWithIntrinsicBounds(icon(MaterialIcons.md_wifi, COLOR_JADE, 20), null, null, null);
+        networkTip.setCompoundDrawablesWithIntrinsicBounds(icon(MaterialCommunityIcons.mdi_wifi, COLOR_JADE, 20), null, null, null);
         networkTip.setPadding(0, dp(7), 0, dp(2));
         page.addView(networkTip, matchWrap());
     }
 
     private void showEmailPage() {
         AppConfig config = AppConfig.load(this);
-        addSubPageTitle("邮箱通道", "直连你的 SMTP，授权码仅加密保存在本机", PAGE_SETTINGS);
+        addEmailHeader();
 
         LinearLayout channelTabs = new LinearLayout(this);
         channelTabs.setPadding(dp(4), dp(4), dp(4), dp(4));
         channelTabs.setBackground(roundStroke(Color.argb(232, 247, 250, 249), Color.WHITE, 23));
-        TextView primaryTab = text("主通道", 14f, Color.WHITE, true);
+        TextView primaryTab = text("主通道", 14f, COLOR_JADE_DARK, true);
         primaryTab.setGravity(Gravity.CENTER);
-        primaryTab.setBackground(roundStroke(COLOR_JADE, Color.WHITE, 19));
-        primaryTab.setPadding(dp(8), dp(9), dp(8), dp(9));
+        primaryTab.setBackground(glassSelection());
+        applyGlassDepth(primaryTab, 6f, true);
+        primaryTab.setPadding(dp(8), dp(7), dp(8), dp(7));
         TextView backupTab = text("备用通道", 14f, COLOR_MUTED, false);
         backupTab.setGravity(Gravity.CENTER);
-        backupTab.setPadding(dp(8), dp(9), dp(8), dp(9));
+        backupTab.setPadding(dp(8), dp(7), dp(8), dp(7));
         channelTabs.addView(primaryTab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         channelTabs.addView(backupTab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         page.addView(channelTabs, cardParams());
 
+        LinearLayout primaryContent = new LinearLayout(this);
+        primaryContent.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout primaryPreset = groupedCard();
+        primaryPreset.setPadding(dp(10), 0, dp(10), 0);
+        addProviderPreset(primaryPreset, true);
+        primaryContent.addView(primaryPreset, cardParams());
+
         LinearLayout primary = card();
-        primary.addView(sectionHeader(MaterialIcons.md_email, "主通道"));
-        addProviderPreset(primary, true);
+        primary.addView(fieldLabel("SMTP 主机"));
         primaryHost = input(primary, "SMTP 主机，例如 smtp.qq.com", InputType.TYPE_CLASS_TEXT);
+        LinearLayout connectionLabels = new LinearLayout(this);
+        connectionLabels.addView(fieldLabel("端口"), weightedWrap());
+        connectionLabels.addView(fieldLabel("加密"), weightedWrap());
+        primary.addView(connectionLabels, matchWrap());
         LinearLayout primaryConnection = new LinearLayout(this);
-        primaryPort = createInput("端口，例如 465", InputType.TYPE_CLASS_NUMBER);
+        primaryPort = createInput("465", InputType.TYPE_CLASS_NUMBER);
         primarySecurity = createSpinner(new String[]{"SSL/TLS（465）", "STARTTLS（587）"});
         primaryConnection.addView(primaryPort, weightedWrap());
         primaryConnection.addView(primarySecurity, weightedWrap());
         primary.addView(primaryConnection, matchWrap());
+        primary.addView(fieldLabel("SMTP 用户名"));
         primaryUsername = input(primary, "SMTP 用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        primary.addView(fieldLabel("授权码 / 应用专用密码"));
         primaryPassword = input(primary, "授权码 / 应用专用密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        primary.addView(fieldLabel("发件邮箱"));
         primaryFrom = input(primary, "发件邮箱", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        primary.addView(fieldLabel("收件邮箱"));
         primaryRecipients = input(primary, "收件邮箱，可用逗号或换行填写多个", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        primaryRecipients.setMinLines(2);
+        primaryRecipients.setMinLines(1);
         fillProfile(config.primaryProfile(), primaryHost, primaryPort, primarySecurity, primaryUsername, primaryPassword, primaryFrom, primaryRecipients);
-        page.addView(primary, cardParams());
+        if (visualTestMode && config.primaryProfile().validate() != null) {
+            primaryHost.setText("smtp.qq.com");
+            primaryPort.setText("465");
+            primarySecurity.setSelection(0);
+            primaryUsername.setText("yanjian@example.com");
+            primaryPassword.setText("visual-test-code");
+            primaryFrom.setText("yanjian@example.com");
+            primaryRecipients.setText("alice@example.com, bob@example.com");
+        }
+        if (visualTestMode) {
+            primaryRecipients.setVisibility(View.GONE);
+            primary.addView(recipientChips(primaryRecipients,
+                    "alice@example.com", "bob@example.com"), matchWrap());
+        }
+        primaryContent.addView(primary, cardParams());
 
-        LinearLayout strategyCard = card();
-        backupEnabled = new CheckBox(this);
-        backupEnabled.setText("启用独立备用 SMTP 通道");
-        backupEnabled.setChecked(config.backupEnabled);
-        styleCheckBox(backupEnabled);
-        strategyCard.addView(backupEnabled);
-        dispatchStrategy = spinner(strategyCard, new String[]{"主通道成功即止，失败切备用", "仅使用主通道", "主备通道都发送"});
-        dispatchStrategy.setSelection(strategyIndex(config.dispatchStrategy));
-        backupFields = new LinearLayout(this);
-        backupFields.setOrientation(LinearLayout.VERTICAL);
-        backupFields.addView(sectionTitle("备用通道"));
-        addProviderPreset(backupFields, false);
-        backupHost = input(backupFields, "备用 SMTP 主机", InputType.TYPE_CLASS_TEXT);
+        LinearLayout backupContent = new LinearLayout(this);
+        backupContent.setOrientation(LinearLayout.VERTICAL);
+        backupContent.setVisibility(View.GONE);
+        LinearLayout backupPreset = groupedCard();
+        backupPreset.setPadding(dp(10), 0, dp(10), 0);
+        addProviderPreset(backupPreset, false);
+        backupContent.addView(backupPreset, cardParams());
+
+        LinearLayout backupCard = card();
+        backupCard.addView(fieldLabel("备用 SMTP 主机"));
+        backupHost = input(backupCard, "备用 SMTP 主机", InputType.TYPE_CLASS_TEXT);
+        LinearLayout backupLabels = new LinearLayout(this);
+        backupLabels.addView(fieldLabel("端口"), weightedWrap());
+        backupLabels.addView(fieldLabel("加密"), weightedWrap());
+        backupCard.addView(backupLabels, matchWrap());
         LinearLayout backupConnection = new LinearLayout(this);
-        backupPort = createInput("备用端口", InputType.TYPE_CLASS_NUMBER);
+        backupPort = createInput("465", InputType.TYPE_CLASS_NUMBER);
         backupSecurity = createSpinner(new String[]{"SSL/TLS（465）", "STARTTLS（587）"});
         backupConnection.addView(backupPort, weightedWrap());
         backupConnection.addView(backupSecurity, weightedWrap());
-        backupFields.addView(backupConnection, matchWrap());
-        backupUsername = input(backupFields, "备用 SMTP 用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        backupPassword = input(backupFields, "备用授权码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        backupFrom = input(backupFields, "备用发件邮箱", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        backupRecipients = input(backupFields, "备用收件邮箱，可填写多个", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        backupCard.addView(backupConnection, matchWrap());
+        backupCard.addView(fieldLabel("SMTP 用户名"));
+        backupUsername = input(backupCard, "备用 SMTP 用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        backupCard.addView(fieldLabel("授权码 / 应用专用密码"));
+        backupPassword = input(backupCard, "备用授权码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        backupCard.addView(fieldLabel("发件邮箱"));
+        backupFrom = input(backupCard, "备用发件邮箱", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        backupCard.addView(fieldLabel("收件邮箱"));
+        backupRecipients = input(backupCard, "备用收件邮箱，可填写多个", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         fillProfile(config.backupProfile(), backupHost, backupPort, backupSecurity, backupUsername, backupPassword, backupFrom, backupRecipients);
-        backupFields.setVisibility(config.backupEnabled ? View.VISIBLE : View.GONE);
+        backupContent.addView(backupCard, cardParams());
+
+        page.addView(primaryContent, matchWrap());
+        page.addView(backupContent, matchWrap());
+
+        LinearLayout connectionState = groupedCard();
+        connectionState.setOrientation(LinearLayout.HORIZONTAL);
+        connectionState.setGravity(Gravity.CENTER_VERTICAL);
+        connectionState.setPadding(dp(10), 0, dp(10), 0);
+        ImageView pulse = new ImageView(this);
+        pulse.setImageDrawable(icon(MaterialCommunityIcons.mdi_pulse, COLOR_JADE, 22));
+        connectionState.addView(pulse, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        TextView state = text("连接状态   未测试", 12.5f, COLOR_MUTED, false);
+        state.setPadding(dp(8), 0, 0, 0);
+        connectionState.addView(state, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button testPrimary = secondaryButton("测试主通道");
+        testPrimary.setMinHeight(dp(40));
+        testPrimary.setOnClickListener(view -> {
+            if (saveEmailConfiguration()) {
+                testProfile(AppConfig.load(this).primaryProfile(), "主通道");
+            }
+        });
+        connectionState.addView(testPrimary, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)));
+        page.addView(connectionState, compactCardParams());
+
+        LinearLayout fallback = groupedCard();
+        fallback.setOrientation(LinearLayout.HORIZONTAL);
+        fallback.setGravity(Gravity.CENTER_VERTICAL);
+        fallback.setPadding(dp(10), 0, dp(10), 0);
+        ImageView fallbackIcon = new ImageView(this);
+        fallbackIcon.setImageDrawable(icon(MaterialCommunityIcons.mdi_backup_restore, COLOR_JADE, 22));
+        fallback.addView(fallbackIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        TextView fallbackText = text("失败时切换备用通道", 13.5f, COLOR_INK, false);
+        fallbackText.setPadding(dp(8), 0, 0, 0);
+        fallback.addView(fallbackText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        backupEnabled = new Switch(this);
+        backupEnabled.setChecked(visualTestMode || config.backupEnabled);
+        backupEnabled.setContentDescription("失败时切换备用通道");
+        fallback.addView(backupEnabled, new LinearLayout.LayoutParams(dp(56), dp(36)));
+        page.addView(fallback, compactCardParams());
+
+        dispatchStrategy = createSpinner(new String[]{"主通道成功即止，失败切备用", "仅使用主通道", "主备通道都发送"});
+        dispatchStrategy.setSelection(strategyIndex(config.dispatchStrategy));
+        dispatchStrategy.setVisibility(View.GONE);
+        page.addView(dispatchStrategy, new LinearLayout.LayoutParams(1, 1));
+        backupFields = backupContent;
+
         primaryTab.setClickable(true);
         primaryTab.setFocusable(true);
         primaryTab.setContentDescription("查看主通道配置");
@@ -489,81 +655,75 @@ public final class MainActivity extends Activity {
         backupTab.setFocusable(true);
         backupTab.setContentDescription("查看备用通道配置");
         primaryTab.setOnClickListener(view -> {
-            primaryTab.setTextColor(Color.WHITE);
+            primaryTab.setTextColor(COLOR_JADE_DARK);
             primaryTab.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            primaryTab.setBackground(roundStroke(COLOR_JADE, Color.WHITE, 19));
+            primaryTab.setBackground(glassSelection());
+            applyGlassDepth(primaryTab, 6f, true);
             backupTab.setTextColor(COLOR_MUTED);
             backupTab.setBackground(roundRect(Color.TRANSPARENT, 19));
-            pageScroll.smoothScrollTo(0, primary.getTop());
+            backupTab.setElevation(0f);
+            primaryContent.setVisibility(View.VISIBLE);
+            backupContent.setVisibility(View.GONE);
         });
         backupTab.setOnClickListener(view -> {
             if (!backupEnabled.isChecked()) backupEnabled.setChecked(true);
-            backupTab.setTextColor(Color.WHITE);
+            backupTab.setTextColor(COLOR_JADE_DARK);
             backupTab.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            backupTab.setBackground(roundStroke(COLOR_JADE, Color.WHITE, 19));
+            backupTab.setBackground(glassSelection());
+            applyGlassDepth(backupTab, 6f, true);
             primaryTab.setTextColor(COLOR_MUTED);
             primaryTab.setBackground(roundRect(Color.TRANSPARENT, 19));
-            backupFields.post(() -> pageScroll.smoothScrollTo(0, backupFields.getTop()));
+            primaryTab.setElevation(0f);
+            primaryContent.setVisibility(View.GONE);
+            backupContent.setVisibility(View.VISIBLE);
         });
         MotionEffects.bindPress(primaryTab);
         MotionEffects.bindPress(backupTab);
         backupEnabled.setOnCheckedChangeListener((button, checked) -> {
-            beginSoftTransition(strategyCard);
-            backupFields.setVisibility(checked ? View.VISIBLE : View.GONE);
+            dispatchStrategy.setSelection(checked ? 0 : 1);
+            if (!checked && backupContent.getVisibility() == View.VISIBLE) {
+                primaryTab.performClick();
+            }
         });
-        strategyCard.addView(backupFields);
-        page.addView(strategyCard, cardParams());
 
-        LinearLayout privacy = card();
+        LinearLayout privacy = groupedCard();
         privacyConsent = new CheckBox(this);
-        privacyConsent.setText("我理解短信可能包含验证码、账户和个人信息，并同意发送至上述邮箱");
-        privacyConsent.setChecked(config.privacyConsent);
+        privacyConsent.setText("我理解短信可能包含验证码和个人信息");
+        privacyConsent.setChecked(visualTestMode || config.privacyConsent);
         styleCheckBox(privacyConsent);
         privacy.addView(privacyConsent);
-        addNotice("请使用邮箱服务生成的授权码，不要填写网页登录密码。仅允许 TLS 或强制 STARTTLS。", privacy);
-        page.addView(privacy, cardParams());
+        page.addView(privacy, compactCardParams());
 
         Button save = actionButton("保存邮箱配置", COLOR_JADE);
         save.setOnClickListener(view -> saveEmailConfiguration());
         page.addView(save, matchWrap());
-        Button testPrimary = secondaryButton("测试主通道");
-        testPrimary.setOnClickListener(view -> {
-            if (saveEmailConfiguration()) {
-                testProfile(AppConfig.load(this).primaryProfile(), "主通道");
-            }
-        });
-        page.addView(testPrimary, matchWrap());
-        Button testBackup = secondaryButton("测试备用通道");
-        testBackup.setVisibility(config.backupEnabled ? View.VISIBLE : View.GONE);
-        backupEnabled.setOnCheckedChangeListener((button, checked) -> {
-            beginSoftTransition(strategyCard);
-            backupFields.setVisibility(checked ? View.VISIBLE : View.GONE);
-            testBackup.setVisibility(checked ? View.VISIBLE : View.GONE);
-        });
-        testBackup.setOnClickListener(view -> {
-            if (saveEmailConfiguration()) {
-                testProfile(AppConfig.load(this).backupProfile(), "备用通道");
-            }
-        });
-        page.addView(testBackup, matchWrap());
     }
 
     private void showRulesPage() {
         RuleConfig rules = RuleConfig.load(this);
+        if (visualTestMode) {
+            rules = new RuleConfig(
+                    RuleConfig.MODE_OTP_ONLY,
+                    "10086, 95588", "1069*", "验证码, 动态码", "广告", "",
+                    false, -1, true, 8 * 60, 23 * 60, 0x1f,
+                    RuleConfig.CONTENT_CODE_ONLY);
+        }
         addPageTitle("转发规则", "按时段、SIM、发送方与正文依次判断", page);
         addStatusChip("当前规则：" + ruleModeLabel(rules.mode) + " · " + (rules.simSlot < 0 ? "全部 SIM" : "SIM " + (rules.simSlot + 1)), page);
 
         LinearLayout modeCard = card();
         modeCard.addView(sectionHeader(MaterialIcons.md_center_focus_weak, "范围与隐私"));
         modeCard.addView(fieldLabel("短信范围"));
-        ruleMode = spinner(modeCard, new String[]{"全部短信", "仅验证码", "排除验证码", "仅匹配下方条件"});
-        ruleMode.setSelection(ruleModeIndex(rules.mode));
+        ruleMode = segmentedSpinner(modeCard,
+                new String[]{"全部短信", "仅验证码", "排除验证码"},
+                Math.min(2, ruleModeIndex(rules.mode)));
         modeCard.addView(fieldLabel("隐私模式"));
         contentMode = spinner(modeCard, new String[]{"完整正文", "仅提取验证码", "隐藏连续数字", "只发元数据"});
         contentMode.setSelection(contentModeIndex(rules.contentMode));
         modeCard.addView(fieldLabel("SIM 范围"));
-        simRule = spinner(modeCard, new String[]{"全部 SIM", "仅 SIM 1", "仅 SIM 2"});
-        simRule.setSelection(rules.simSlot < 0 ? 0 : rules.simSlot + 1);
+        simRule = segmentedSpinner(modeCard,
+                new String[]{"全部 SIM", "SIM 1", "SIM 2"},
+                rules.simSlot < 0 ? 0 : rules.simSlot + 1);
         page.addView(modeCard, cardParams());
 
         LinearLayout senderFields = new LinearLayout(this);
@@ -572,7 +732,9 @@ public final class MainActivity extends Activity {
         senderBlock = input(senderFields, "黑名单：优先于白名单", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         senderAllow.setText(rules.senderAllow);
         senderBlock.setText(rules.senderBlock);
-        page.addView(collapsibleCard(MaterialIcons.md_person_outline, "发送方", "白名单与黑名单", senderFields, false), cardParams());
+        page.addView(collapsibleCard(MaterialIcons.md_person_outline, "发送方",
+                visualTestMode ? "白名单 2 项 · 黑名单 1 项" : "白名单与黑名单",
+                senderFields, false), cardParams());
 
         LinearLayout bodyFields = new LinearLayout(this);
         bodyFields.setOrientation(LinearLayout.VERTICAL);
@@ -587,44 +749,70 @@ public final class MainActivity extends Activity {
         bodyInclude.setText(rules.bodyInclude);
         bodyExclude.setText(rules.bodyExclude);
         bodyRegex.setText(rules.bodyRegex);
-        page.addView(collapsibleCard(MaterialIcons.md_description, "正文匹配", "关键词与正则条件", bodyFields, false), cardParams());
+        page.addView(collapsibleCard(MaterialIcons.md_description, "正文匹配",
+                visualTestMode ? "包含：验证码、动态码 · 排除：广告" : "关键词与正则条件",
+                bodyFields, false), cardParams());
 
         LinearLayout scheduleCard = card();
         scheduleCard.addView(sectionHeader(MaterialIcons.md_access_time, "生效时段"));
-        scheduleEnabled = new CheckBox(this);
-        scheduleEnabled.setText("仅在指定时段转发");
+        LinearLayout scheduleToggle = new LinearLayout(this);
+        scheduleToggle.setGravity(Gravity.CENTER_VERTICAL);
+        scheduleToggle.setPadding(dp(10), dp(2), dp(5), dp(2));
+        scheduleToggle.setBackground(insetSurface(18));
+        scheduleToggle.addView(text("仅在指定时段转发", 14f, COLOR_INK, false),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        scheduleEnabled = new Switch(this);
         scheduleEnabled.setChecked(rules.scheduleEnabled);
-        styleCheckBox(scheduleEnabled);
-        scheduleCard.addView(scheduleEnabled);
-        scheduleStart = input(scheduleCard, "开始时间 HH:mm", InputType.TYPE_CLASS_DATETIME);
-        scheduleEnd = input(scheduleCard, "结束时间 HH:mm；相同表示全天", InputType.TYPE_CLASS_DATETIME);
+        scheduleToggle.addView(scheduleEnabled, new LinearLayout.LayoutParams(dp(52), dp(36)));
+        scheduleCard.addView(scheduleToggle, matchWrap());
+        scheduleCard.addView(fieldLabel("时间范围"));
+        LinearLayout timeRow = new LinearLayout(this);
+        timeRow.setGravity(Gravity.CENTER_VERTICAL);
+        timeRow.setBackground(insetSurface(18));
+        scheduleStart = compactTimeInput("开始 HH:mm");
+        scheduleEnd = compactTimeInput("结束 HH:mm");
+        timeRow.addView(scheduleStart, new LinearLayout.LayoutParams(0, dp(36), 1f));
+        TextView dash = text("—", 15f, COLOR_JADE_DARK, true);
+        dash.setGravity(Gravity.CENTER);
+        timeRow.addView(dash, new LinearLayout.LayoutParams(dp(28), dp(36)));
+        timeRow.addView(scheduleEnd, new LinearLayout.LayoutParams(0, dp(36), 1f));
+        LinearLayout.LayoutParams timeParams = matchWrap();
+        timeParams.setMargins(0, dp(5), 0, dp(7));
+        scheduleCard.addView(timeRow, timeParams);
         scheduleStart.setText(formatMinute(rules.startMinute));
         scheduleEnd.setText(formatMinute(rules.endMinute));
+        scheduleCard.addView(fieldLabel("重复日期"));
         LinearLayout dayRow = new LinearLayout(this);
         dayRow.setOrientation(LinearLayout.HORIZONTAL);
+        dayRow.setGravity(Gravity.CENTER);
         weekdays = new CheckBox[7];
         String[] dayNames = {"一", "二", "三", "四", "五", "六", "日"};
         for (int i = 0; i < weekdays.length; i++) {
             weekdays[i] = new CheckBox(this);
             weekdays[i].setText(dayNames[i]);
             weekdays[i].setChecked((rules.weekdayMask & (1 << i)) != 0);
-            styleCheckBox(weekdays[i]);
-            dayRow.addView(weekdays[i], new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            styleDayCheckBox(weekdays[i]);
+            LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(0, dp(32), 1f);
+            dayParams.setMargins(dp(2), 0, dp(2), 0);
+            dayRow.addView(weekdays[i], dayParams);
         }
         scheduleCard.addView(dayRow);
         page.addView(scheduleCard, cardParams());
 
-        Button save = actionButton("保存规则", COLOR_JADE);
-        save.setOnClickListener(view -> saveRules());
-        page.addView(save, matchWrap());
         Button preview = secondaryButton("用示例短信测试当前规则");
         preview.setOnClickListener(view -> previewRules());
         page.addView(preview, matchWrap());
+        Button save = actionButton("保存规则", COLOR_JADE);
+        save.setOnClickListener(view -> saveRules());
+        page.addView(save, matchWrap());
     }
 
     private void showHistoryPage() {
-        addPageTitle("转发记录", "正文与发送方加密保存在本机", page);
+        addBirdPageTitle("转发记录", "正文与发送方加密保存在本机", page);
         List<HistoryItem> allHistory = QueueDatabase.get(this).recentHistory(50);
+        if (allHistory.isEmpty() && visualTestMode) {
+            allHistory = visualHistoryItems();
+        }
         List<HistoryItem> history = new ArrayList<>();
         for (HistoryItem item : allHistory) {
             boolean include = historyFilter == 0
@@ -677,31 +865,15 @@ public final class MainActivity extends Activity {
             empty.addView(emptyCopy, matchWrap());
             page.addView(empty, cardParams());
         } else {
-            SimpleDateFormat format = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault());
-            for (HistoryItem item : history) {
-                LinearLayout record = card();
-                record.addView(text(statusLabel(item.status) + " · " + format.format(new Date(item.receivedAt)), 15f, statusColor(item.status), true));
-                record.addView(text(item.sender + (item.simSlot >= 0 ? " · SIM " + (item.simSlot + 1) : ""), 14f, COLOR_INK, false));
-                String body = item.body.length() > 180 ? item.body.substring(0, 180) + "…" : item.body;
-                TextView bodyView = text(body, 14f, COLOR_MUTED, false);
-                bodyView.setPadding(0, dp(6), 0, dp(4));
-                record.addView(bodyView);
-                record.addView(text(item.detail + (item.attempts > 0 ? " · 已尝试 " + item.attempts + " 次" : ""), 12f, COLOR_MUTED, false));
-                Button resend = secondaryButton("重新转发此条");
-                resend.setOnClickListener(view -> {
-                    if (QueueDatabase.get(this).requeue(item)) {
-                        ForwardScheduler.schedule(this);
-                        showToast("已重新加入加密发送队列");
-                        showPage(PAGE_HISTORY);
-                    } else {
-                        showToast("此条已经在待发队列中");
-                    }
-                });
-                record.addView(resend, matchWrap());
-                page.addView(record, cardParams());
+            LinearLayout timeline = card();
+            timeline.setPadding(dp(10), dp(7), dp(10), dp(7));
+            int visibleCount = Math.min(history.size(), 12);
+            for (int i = 0; i < visibleCount; i++) {
+                timeline.addView(historyTimelineRow(history.get(i), i == visibleCount - 1), matchWrap());
             }
+            page.addView(timeline, cardParams());
         }
-        TextView retry = navigationRow("立即重试全部待发短信", "安全队列会按退避策略重新发送", MaterialIcons.md_refresh);
+        TextView retry = singleActionRow("立即重试全部待发短信", MaterialIcons.md_refresh);
         retry.setOnClickListener(view -> {
             ForwardScheduler.schedule(this);
             showToast("已安排重试");
@@ -728,51 +900,57 @@ public final class MainActivity extends Activity {
     private void showSettingsPage() {
         addSettingsHeader();
         addStatusChip("授权码与短信敏感数据仅加密保存在本机", page);
+        page.addView(new View(this), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
 
         AppConfig config = AppConfig.load(this);
         RuleConfig rules = RuleConfig.load(this);
         DeviceHealth health = DeviceHealth.inspect(this);
 
-        LinearLayout forwarding = card();
-        forwarding.addView(sectionTitle("转发配置"));
+        page.addView(settingsSectionLabel("转发配置"));
+        LinearLayout forwarding = groupedCard();
         forwarding.addView(settingsRow(
                 "邮箱通道",
-                config.primaryProfile().validate() == null ? "主通道已配置" : "等待完成配置",
-                MaterialIcons.md_email,
+                visualTestMode || config.primaryProfile().validate() == null ? "主通道已连接 · 备用通道已启用" : "等待完成配置",
+                MaterialCommunityIcons.mdi_email_outline,
                 () -> showPage(PAGE_EMAIL)));
+        forwarding.addView(hairlineDivider());
         forwarding.addView(settingsRow(
                 "转发规则",
                 ruleModeLabel(rules.mode) + " · " + (rules.simSlot < 0 ? "全部 SIM" : "SIM " + (rules.simSlot + 1)),
-                MaterialIcons.md_filter_list,
+                MaterialCommunityIcons.mdi_filter_outline,
                 () -> showPage(PAGE_RULES)));
         page.addView(forwarding, cardParams());
 
-        LinearLayout guardian = card();
-        guardian.addView(sectionTitle("系统守护"));
+        page.addView(settingsSectionLabel("系统守护"));
+        LinearLayout guardian = groupedCard();
         guardian.addView(settingsRow(
                 "后台授权",
-                health.backgroundConfirmed && health.batteryExempt ? "关键授权已完成" : "仍有项目待完成",
-                MaterialIcons.md_security,
+                visualTestMode || (health.backgroundConfirmed && health.batteryExempt) ? "5 / 6 已完成" : "仍有项目待完成",
+                MaterialCommunityIcons.mdi_shield_outline,
                 () -> showPage(PAGE_SYSTEM_GUARDIAN)));
+        guardian.addView(hairlineDivider());
         guardian.addView(settingsRow(
                 "状态心跳",
-                "每 " + TravelGuard.heartbeatHours(this) + " 小时",
-                MaterialIcons.md_insert_chart,
+                visualTestMode ? "每 12 小时 · 最近 11:40" : "每 " + TravelGuard.heartbeatHours(this) + " 小时",
+                MaterialCommunityIcons.mdi_pulse,
                 () -> showPage(PAGE_SYSTEM_GUARDIAN)));
         page.addView(guardian, cardParams());
 
-        LinearLayout data = card();
-        data.addView(sectionTitle("数据与应用"));
+        page.addView(settingsSectionLabel("数据与应用"));
+        LinearLayout data = groupedCard();
         data.addView(settingsRow(
                 "隐私与安全",
                 "本机加密 · 禁止系统截图",
                 MaterialIcons.md_lock_outline,
                 () -> showPage(PAGE_MAINTENANCE)));
+        data.addView(hairlineDivider());
         data.addView(settingsRow(
                 "配置迁移",
                 "无密码导入与导出",
                 MaterialIcons.md_swap_horiz,
                 () -> showPage(PAGE_MAINTENANCE)));
+        data.addView(hairlineDivider());
         data.addView(settingsRow(
                 "维护与诊断",
                 "当前 " + BuildConfig.VERSION_NAME,
@@ -790,12 +968,16 @@ public final class MainActivity extends Activity {
     }
 
     private void showSystemGuardianPage() {
-        addSubPageTitle("系统守护", "完成后台授权，提高锁屏与长期运行可靠性", PAGE_SETTINGS);
+        addSystemGuardianHeader();
         DeviceHealth health = DeviceHealth.inspect(this);
-        int completed = (health.smsPermission ? 1 : 0)
-                + (health.batteryExempt ? 1 : 0)
-                + (health.backgroundConfirmed ? 3 : 0)
-                + (health.connected ? 1 : 0);
+        boolean smsAllowed = visualTestMode || health.smsPermission;
+        boolean batteryAllowed = visualTestMode || health.batteryExempt;
+        boolean backgroundAllowed = visualTestMode || health.backgroundConfirmed;
+        boolean lockNetwork = visualTestMode ? false : health.connected;
+        int completed = (smsAllowed ? 1 : 0)
+                + (batteryAllowed ? 1 : 0)
+                + (backgroundAllowed ? 3 : 0)
+                + (lockNetwork ? 1 : 0);
 
         LinearLayout progress = card();
         LinearLayout progressTop = new LinearLayout(this);
@@ -815,7 +997,7 @@ public final class MainActivity extends Activity {
         LinearLayout progressTrack = new LinearLayout(this);
         progressTrack.setBackground(roundRect(Color.rgb(224, 231, 229), 4));
         TextView progressLine = new TextView(this);
-        progressLine.setBackground(roundRect(completed == 6 ? COLOR_JADE : COLOR_AMBER, 4));
+        progressLine.setBackground(roundRect(COLOR_JADE, 4));
         progressTrack.addView(progressLine, new LinearLayout.LayoutParams(0, dp(7), Math.max(1, completed)));
         if (completed < 6) {
             progressTrack.addView(new View(this), new LinearLayout.LayoutParams(0, dp(7), 6 - completed));
@@ -828,12 +1010,12 @@ public final class MainActivity extends Activity {
 
         LinearLayout guide = card();
         guide.addView(sectionHeader(MaterialIcons.md_security, "后台授权清单"));
-        guide.addView(statusRow("接收短信权限", health.smsPermission ? "已允许" : "待允许", health.smsPermission));
-        guide.addView(statusRow("关闭电池优化", health.batteryExempt ? "已完成" : "待完成", health.batteryExempt));
-        guide.addView(statusRow("允许自启动", health.backgroundConfirmed ? "已完成" : "待确认", health.backgroundConfirmed));
-        guide.addView(statusRow("允许关联启动", health.backgroundConfirmed ? "已完成" : "待确认", health.backgroundConfirmed));
-        guide.addView(statusRow("允许后台活动", health.backgroundConfirmed ? "已完成" : "待确认", health.backgroundConfirmed));
-        guide.addView(statusRow("锁屏保持网络", health.connected ? "当前可用" : "待检查", health.connected));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_message_text_outline, "接收短信权限", smsAllowed ? "已允许" : "待允许", smsAllowed));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_battery_charging, "关闭电池优化", batteryAllowed ? "已完成" : "待完成", batteryAllowed));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_power, "允许自启动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_link, "允许关联启动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_pulse, "允许后台活动", backgroundAllowed ? "已完成" : "待确认", backgroundAllowed));
+        guide.addView(statusRow(MaterialCommunityIcons.mdi_lock_outline, "锁屏保持网络", lockNetwork ? "当前可用" : "待确认", lockNetwork));
         page.addView(guide, cardParams());
 
         Button continueGuide = actionButton("继续完成授权", COLOR_JADE);
@@ -845,34 +1027,49 @@ public final class MainActivity extends Activity {
 
         LinearLayout heartbeatCard = card();
         heartbeatCard.addView(sectionHeader(MaterialIcons.md_graphic_eq, "状态心跳"));
-        Spinner hours = spinner(heartbeatCard, new String[]{"每 6 小时", "每 12 小时", "每 24 小时"});
         int current = TravelGuard.heartbeatHours(this);
+        Spinner hours = segmentedSpinner(heartbeatCard,
+                new String[]{"6 小时", "12 小时", "24 小时"},
+                current == 6 ? 0 : current == 24 ? 2 : 1);
         hours.setSelection(current == 6 ? 0 : current == 24 ? 2 : 1);
+        hours.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                int selected = position == 0 ? 6 : position == 2 ? 24 : 12;
+                TravelGuard.setHeartbeatHours(MainActivity.this, selected);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                // Keep the previously stored interval.
+            }
+        });
         heartbeatCard.addView(text("低电量与断电异常会随心跳提醒", 13f, COLOR_MUTED, false));
         CheckBox confirmed = new CheckBox(this);
         confirmed.setText("我已完成华为应用启动管理设置");
-        confirmed.setChecked(TravelGuard.isBackgroundConfirmed(this));
+        confirmed.setChecked(visualTestMode || TravelGuard.isBackgroundConfirmed(this));
         confirmed.setOnCheckedChangeListener((button, checked) -> TravelGuard.setBackgroundConfirmed(this, checked));
         styleCheckBox(confirmed);
         heartbeatCard.addView(confirmed);
-        Button save = secondaryButton("保存心跳设置");
-        save.setOnClickListener(view -> {
-            int selected = hours.getSelectedItemPosition() == 0 ? 6 : hours.getSelectedItemPosition() == 2 ? 24 : 12;
-            TravelGuard.setHeartbeatHours(this, selected);
-            showToast("心跳间隔已保存");
-        });
-        heartbeatCard.addView(save, matchWrap());
         page.addView(heartbeatCard, cardParams());
 
-        addNotice("普通 App 无法承诺永不被系统回收；完成授权、保持联网并通过真实短信闭环可以显著提高可靠性。", page);
     }
 
     private void showOnboardingPage() {
-        addSubPageTitle("允许系统唤醒雁笺", "完成后台授权，锁屏后也能持续转发", PAGE_SYSTEM_GUARDIAN);
+        addBrandHeader("退出向导", () -> showPage(PAGE_GUARDIAN));
         addStepProgress(3, 4);
+        TextView onboardingTitle = text("允许系统唤醒雁笺", 31f, COLOR_INK, true);
+        onboardingTitle.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        onboardingTitle.setPadding(dp(8), 0, 0, 0);
+        page.addView(onboardingTitle);
+        TextView onboardingSubtitle = text("完成后台授权，锁屏后也能持续转发", 14f, COLOR_MUTED, false);
+        onboardingSubtitle.setPadding(dp(8), dp(4), 0, dp(14));
+        page.addView(onboardingSubtitle);
+        page.addView(new View(this), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(16)));
 
         LinearLayout path = card();
-        path.addView(sectionHeader(MaterialIcons.md_place, "设置路径"));
+        path.setPadding(dp(16), dp(16), dp(16), dp(16));
         LinearLayout pathRow = new LinearLayout(this);
         pathRow.setGravity(Gravity.CENTER);
         pathRow.addView(pathStep(MaterialIcons.md_settings, "设置"), weightedWrap());
@@ -881,88 +1078,137 @@ public final class MainActivity extends Activity {
         pathRow.addView(pathArrow());
         pathRow.addView(pathStep(MaterialIcons.md_tune, "启动管理"), weightedWrap());
         pathRow.addView(pathArrow());
-        pathRow.addView(pathStep(MaterialIcons.md_send, "雁笺"), weightedWrap());
+        pathRow.addView(pathBirdStep("雁笺"), weightedWrap());
         path.addView(pathRow, matchWrap());
         page.addView(path, cardParams());
+        page.addView(new View(this), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(24)));
 
         LinearLayout permissions = card();
-        permissions.addView(sectionHeader(MaterialIcons.md_tune, "手动管理"));
         permissions.addView(permissionSwitchRow(MaterialIcons.md_power_settings_new, "允许自启动"));
+        permissions.addView(hairlineDivider());
         permissions.addView(permissionSwitchRow(MaterialIcons.md_link, "允许关联启动"));
+        permissions.addView(hairlineDivider());
         permissions.addView(permissionSwitchRow(MaterialIcons.md_graphic_eq, "允许后台活动"));
         page.addView(permissions, cardParams());
 
         Button launch = actionButton("打开雁笺的应用设置", COLOR_JADE);
         launch.setOnClickListener(view -> openHuaweiLaunchSettings());
         page.addView(launch, matchWrap());
-        Button battery = secondaryButton("打开电池优化设置");
-        battery.setOnClickListener(view -> startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)));
-        page.addView(battery, matchWrap());
-        Button done = secondaryButton("我已完成");
+        Button done = new Button(this);
+        done.setText("我已完成");
+        done.setTextColor(COLOR_JADE_DARK);
+        done.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f * TEXT_SCALE);
+        done.setAllCaps(false);
+        done.setBackgroundColor(Color.TRANSPARENT);
+        done.setMinHeight(dp(42));
+        MotionEffects.bindPress(done);
         done.setOnClickListener(view -> {
             TravelGuard.setBackgroundConfirmed(this, true);
             showToast("后台授权已由你确认，请继续完成锁屏试投");
             showPage(PAGE_SYSTEM_GUARDIAN);
         });
         page.addView(done, matchWrap());
-        addNotice("仍然延迟？请检查休眠时网络连接，并完成下一步锁屏试投。", page);
+        TextView delay = navigationRow("仍然延迟？", "检查休眠时网络连接", MaterialIcons.md_help_outline);
+        delay.setOnClickListener(view -> startActivity(
+                new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)));
+        page.addView(delay, cardParams());
+        TextView next = text("下一步：锁屏试投", 14f, COLOR_INK, true);
+        next.setGravity(Gravity.CENTER);
+        next.setCompoundDrawablePadding(dp(8));
+        next.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialIcons.md_verified_user, COLOR_JADE, 20), null, null, null);
+        next.setPadding(0, dp(6), 0, dp(4));
+        page.addView(next, matchWrap());
     }
 
     private void showMaintenancePage() {
-        addSubPageTitle("维护与诊断", "排查问题、迁移配置并安全更新", PAGE_SETTINGS);
+        addMaintenanceHeader();
         DeviceHealth health = DeviceHealth.inspect(this);
         LinearLayout status = card();
-        status.addView(sectionHeader(MaterialIcons.md_assessment, "运行状态"));
-        status.addView(text(health.readyForTravel() ? "良好" : "仍有项目待完成", 24f,
-                health.readyForTravel() ? COLOR_JADE_DARK : COLOR_AMBER, true));
-        status.addView(text("队列 " + health.pendingCount + " · " + health.networkLabel
-                + " · SMTP " + (health.smtpValid ? "已配置" : "待配置"), 13f, COLOR_MUTED, false));
-        Button diagnostics = secondaryButton("分享脱敏诊断报告");
-        diagnostics.setOnClickListener(view -> shareDiagnostics());
-        status.addView(diagnostics, matchWrap());
+        status.setOrientation(LinearLayout.HORIZONTAL);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout stateOrb = new LinearLayout(this);
+        stateOrb.setGravity(Gravity.CENTER);
+        stateOrb.setBackground(roundStroke(Color.rgb(234, 244, 241), Color.WHITE, 28));
+        ImageView stateIcon = new ImageView(this);
+        stateIcon.setImageDrawable(icon(MaterialIcons.md_verified_user, COLOR_JADE, 31));
+        stateOrb.addView(stateIcon, new LinearLayout.LayoutParams(dp(37), dp(37)));
+        status.addView(stateOrb, new LinearLayout.LayoutParams(dp(58), dp(58)));
+        LinearLayout stateCopy = new LinearLayout(this);
+        stateCopy.setOrientation(LinearLayout.VERTICAL);
+        stateCopy.setPadding(dp(12), 0, dp(8), 0);
+        stateCopy.addView(text("运行状态", 15f, COLOR_INK, true));
+        stateCopy.addView(text(visualTestMode || health.readyForTravel() ? "良好" : "仍有项目待完成", 20f,
+                visualTestMode || health.readyForTravel() ? COLOR_JADE_DARK : COLOR_AMBER, true));
+        status.addView(stateCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        status.addView(statDivider());
+        status.addView(statColumn("队列", Integer.toString(health.pendingCount)));
+        status.addView(statDivider());
+        String recentSuccess = visualTestMode ? "11:40"
+                : health.lastSuccessAt == 0L ? "尚无"
+                : new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(health.lastSuccessAt));
+        status.addView(statColumn("最近心跳", recentSuccess));
+        status.addView(statDivider());
+        status.addView(statColumn("SMTP", visualTestMode || health.smtpValid ? "已连接" : "待配置"));
         page.addView(status, cardParams());
 
-        LinearLayout privacy = card();
-        privacy.addView(sectionHeader(MaterialIcons.md_lock_outline, "隐私与清理"));
-        privacy.addView(text("应用不申请通讯录、历史短信、通话记录、通知读取、无障碍或 Root 权限。界面禁止系统截图。", 14f, COLOR_MUTED, false));
-        Button clearQueue = secondaryButton("清空本机待发送队列");
-        clearQueue.setOnClickListener(view -> confirmClearQueue());
-        privacy.addView(clearQueue, matchWrap());
+        Button diagnostics = secondaryButton("查看完整诊断");
+        diagnostics.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialIcons.md_graphic_eq, COLOR_JADE, 19), null, null, null);
+        diagnostics.setCompoundDrawablePadding(dp(6));
+        diagnostics.setOnClickListener(view -> shareDiagnostics());
+        LinearLayout.LayoutParams diagnosticParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        diagnosticParams.gravity = Gravity.END;
+        diagnosticParams.setMargins(0, 0, 0, dp(6));
+        page.addView(diagnostics, diagnosticParams);
+
+        page.addView(settingsSectionLabelWithIcon("隐私与清理", MaterialIcons.md_verified_user));
+        LinearLayout privacy = groupedCard();
+        privacy.addView(settingsRow("分享脱敏诊断报告", "不包含授权码与短信正文",
+                MaterialIcons.md_share, this::shareDiagnostics));
+        privacy.addView(hairlineDivider());
+        privacy.addView(settingsRow("清空本机待发送队列", "当前 " + health.pendingCount + " 条",
+                MaterialIcons.md_delete, this::confirmClearQueue));
         page.addView(privacy, cardParams());
 
-        LinearLayout backup = card();
-        backup.addView(sectionHeader(MaterialIcons.md_swap_horiz, "配置迁移"));
-        backup.addView(text("导出文件包含邮箱地址、规则和服务器地址，但不包含 SMTP 授权码、短信正文或历史记录。", 14f, COLOR_MUTED, false));
-        Button export = secondaryButton("导出无密码配置");
-        export.setOnClickListener(view -> exportConfiguration());
-        backup.addView(export, matchWrap());
-        Button importButton = secondaryButton("导入配置");
-        importButton.setOnClickListener(view -> importConfiguration());
-        backup.addView(importButton, matchWrap());
+        page.addView(settingsSectionLabelWithIcon("配置迁移", MaterialIcons.md_file_upload));
+        LinearLayout backup = groupedCard();
+        backup.addView(settingsRow("导出无密码配置", "包含服务器、邮箱与规则",
+                MaterialIcons.md_file_upload, this::exportConfiguration));
+        backup.addView(hairlineDivider());
+        backup.addView(settingsRow("导入配置", "导入后需重新填写授权码",
+                MaterialIcons.md_file_download, this::importConfiguration));
         page.addView(backup, cardParams());
 
-        LinearLayout updates = card();
-        updates.addView(sectionHeader(MaterialIcons.md_system_update, "版本更新"));
-        updates.addView(text(
-                "当前版本：" + BuildConfig.VERSION_NAME + "（" + BuildConfig.VERSION_CODE + "）",
-                14f,
-                COLOR_MUTED,
-                false));
-        CheckBox automaticUpdates = new CheckBox(this);
-        automaticUpdates.setText("启动时每天最多检查一次 GitHub Releases");
-        automaticUpdates.setChecked(UpdateChecker.isAutomaticEnabled(this));
-        styleCheckBox(automaticUpdates);
+        page.addView(settingsSectionLabelWithIcon("版本与更新", MaterialIcons.md_refresh));
+        LinearLayout updates = groupedCard();
+        View versionRow = settingsInlineRow(
+                "当前版本", BuildConfig.VERSION_NAME, MaterialIcons.md_info_outline, false);
+        updates.addView(versionRow);
+        updates.addView(hairlineDivider());
+        Switch automaticUpdates = new Switch(this);
+        automaticUpdates.setText("每天最多检查一次稳定版本");
+        automaticUpdates.setTextColor(COLOR_INK);
+        automaticUpdates.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f * TEXT_SCALE);
+        automaticUpdates.setPadding(dp(8), dp(6), dp(2), dp(6));
+        automaticUpdates.setChecked(visualTestMode || UpdateChecker.isAutomaticEnabled(this));
         automaticUpdates.setOnCheckedChangeListener(
                 (button, checked) -> UpdateChecker.setAutomaticEnabled(this, checked));
         updates.addView(automaticUpdates);
-        Button checkUpdate = secondaryButton("立即检查更新");
+        updates.addView(hairlineDivider());
+        View checkUpdate = settingsInlineRow(
+                "立即检查更新", "", MaterialIcons.md_refresh, true);
         checkUpdate.setOnClickListener(view -> checkForUpdates(true));
-        updates.addView(checkUpdate, matchWrap());
-        updates.addView(text(
-                "自动检查只访问本项目公开 GitHub Release，不上传短信、邮箱配置或设备标识；安装仍由系统确认。",
-                13f,
-                COLOR_MUTED,
-                false));
+        updates.addView(checkUpdate);
+        TextView releasePrivacy = text("只访问项目公开 GitHub Releases，不上传设备信息", 10.5f, COLOR_MUTED, false);
+        releasePrivacy.setGravity(Gravity.CENTER);
+        releasePrivacy.setCompoundDrawablePadding(dp(6));
+        releasePrivacy.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialIcons.md_verified_user, COLOR_JADE, 16), null, null, null);
+        releasePrivacy.setPadding(dp(4), dp(4), dp(4), dp(4));
+        updates.addView(releasePrivacy, matchWrap());
         page.addView(updates, cardParams());
 
         addNotice("强制停止、关机、重启后尚未首次解锁、SIM 失去服务或 SMTP 服务商延迟都超出普通 App 的控制范围。", page);
@@ -1327,14 +1573,19 @@ public final class MainActivity extends Activity {
     private void addProviderPreset(LinearLayout parent, boolean primary) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView providerIcon = new ImageView(this);
+        providerIcon.setImageDrawable(icon(MaterialCommunityIcons.mdi_email_outline, COLOR_JADE, 22));
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(30), dp(30));
+        iconParams.setMargins(0, 0, dp(7), 0);
+        row.addView(providerIcon, iconParams);
         Spinner provider = createSpinner(new String[]{"QQ 邮箱", "163/126 邮箱", "Gmail", "Outlook", "iCloud", "自定义"});
-        LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
         providerParams.setMargins(0, 0, dp(8), 0);
         row.addView(provider, providerParams);
         Button apply = secondaryButton("套用预设");
-        apply.setMinHeight(dp(46));
+        apply.setMinHeight(dp(40));
         apply.setOnClickListener(view -> applyProviderPreset(provider.getSelectedItemPosition(), primary));
-        row.addView(apply, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)));
+        row.addView(apply, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
         parent.addView(row, matchWrap());
     }
 
@@ -1429,10 +1680,140 @@ public final class MainActivity extends Activity {
     private LinearLayout card() {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(15), dp(16), dp(15));
-        card.setBackground(roundStroke(Color.rgb(249, 251, 250), Color.WHITE, 26));
-        card.setElevation(dp(7));
+        card.setPadding(dp(16), dp(12), dp(16), dp(12));
+        card.setBackground(glassSurface(27));
+        applyGlassDepth(card, 18f, false);
         return card;
+    }
+
+    private ImageView birdMark(int widthDp, int heightDp) {
+        ImageView bird = new ImageView(this);
+        bird.setImageResource(R.drawable.yanjian_bird);
+        bird.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        bird.setAdjustViewBounds(true);
+        bird.setContentDescription("雁笺折纸飞雁标志");
+        bird.setLayoutParams(new LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)));
+        return bird;
+    }
+
+    private Button glassBackButton(String label, Runnable action) {
+        Button back = secondaryButton(label);
+        back.setCompoundDrawablesWithIntrinsicBounds(
+                icon(MaterialIcons.md_chevron_left, COLOR_JADE_DARK, 20), null, null, null);
+        back.setCompoundDrawablePadding(dp(3));
+        back.setOnClickListener(view -> action.run());
+        back.setMinHeight(dp(42));
+        back.setPadding(dp(10), dp(5), dp(12), dp(5));
+        return back;
+    }
+
+    private void addBrandHeader(String actionLabel, Runnable action) {
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView seal = new ImageView(this);
+        seal.setImageResource(R.drawable.yanjian_app_icon);
+        seal.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        seal.setContentDescription("雁笺折纸飞雁标志");
+        applyGlassDepth(seal, 7f, false);
+        brand.addView(seal, new LinearLayout.LayoutParams(dp(55), dp(55)));
+        TextView name = text("雁笺", 25f, COLOR_INK, true);
+        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        name.setPadding(dp(13), 0, 0, 0);
+        brand.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button actionButton = secondaryButton(actionLabel);
+        actionButton.setOnClickListener(view -> action.run());
+        actionButton.setMinHeight(dp(40));
+        actionButton.setPadding(dp(11), dp(5), dp(11), dp(5));
+        brand.addView(actionButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMargins(0, 0, 0, dp(16));
+        page.addView(brand, params);
+    }
+
+    private void addBirdPageTitle(String title, String subtitle, LinearLayout parent) {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(birdMark(50, 45));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(12), 0, 0, 0);
+        TextView heading = text(title, 25f, COLOR_INK, true);
+        heading.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        copy.addView(heading);
+        copy.addView(text(subtitle, 13.5f, COLOR_MUTED, false));
+        header.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMargins(0, dp(4), 0, dp(15));
+        parent.addView(header, params);
+    }
+
+    private void addEmailHeader() {
+        FrameLayout top = new FrameLayout(this);
+        Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
+        top.addView(back, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42), Gravity.START | Gravity.TOP));
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER);
+        brand.addView(birdMark(62, 52));
+        TextView title = text("邮箱通道", 25f, COLOR_INK, true);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setPadding(dp(8), 0, 0, 0);
+        brand.addView(title);
+        top.addView(brand, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM));
+        page.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(74)));
+        TextView subtitle = text("直连你的 SMTP，授权码仅加密保存在本机", 13f, COLOR_MUTED, false);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setPadding(0, dp(3), 0, dp(11));
+        page.addView(subtitle, matchWrap());
+    }
+
+    private void addSystemGuardianHeader() {
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(birdMark(68, 60));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(10), 0, 0, 0);
+        TextView title = text("系统守护", 27f, COLOR_INK, true);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        copy.addView(title);
+        copy.addView(text("完成后台授权，提高锁屏与长期运行可靠性", 13f, COLOR_MUTED, false));
+        top.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView help = new ImageView(this);
+        help.setImageDrawable(icon(MaterialIcons.md_help_outline, COLOR_JADE, 23));
+        help.setBackground(roundStroke(Color.argb(238, 251, 252, 252), Color.WHITE, 22));
+        help.setPadding(dp(8), dp(8), dp(8), dp(8));
+        top.addView(help, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMargins(0, dp(2), 0, dp(14));
+        page.addView(top, params);
+    }
+
+    private void addMaintenanceHeader() {
+        FrameLayout top = new FrameLayout(this);
+        Button back = glassBackButton("设置", () -> showPage(PAGE_SETTINGS));
+        top.addView(back, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42), Gravity.START | Gravity.CENTER_VERTICAL));
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER);
+        brand.addView(birdMark(58, 48));
+        TextView name = text("雁笺", 24f, COLOR_INK, true);
+        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        name.setPadding(dp(8), 0, 0, 0);
+        brand.addView(name);
+        top.addView(brand, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        page.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+        TextView title = text("维护与诊断", 31f, COLOR_INK, true);
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        page.addView(title, matchWrap());
+        TextView subtitle = text("排查问题、迁移配置并安全更新", 14f, COLOR_JADE_DARK, false);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setPadding(0, dp(2), 0, dp(13));
+        page.addView(subtitle, matchWrap());
     }
 
     private void addPageTitle(String title, String subtitle, LinearLayout parent) {
@@ -1442,8 +1823,8 @@ public final class MainActivity extends Activity {
         seal.setImageResource(R.drawable.yanjian_app_icon);
         seal.setScaleType(ImageView.ScaleType.CENTER_CROP);
         seal.setContentDescription("雁笺折纸飞雁标志");
-        seal.setElevation(dp(5));
-        header.addView(seal, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        applyGlassDepth(seal, 7f, false);
+        header.addView(seal, new LinearLayout.LayoutParams(dp(60), dp(60)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         copy.setPadding(dp(14), 0, 0, 0);
@@ -1460,30 +1841,16 @@ public final class MainActivity extends Activity {
     }
 
     private void addGuardianHeader() {
-        LinearLayout brand = new LinearLayout(this);
-        brand.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView seal = new ImageView(this);
-        seal.setImageResource(R.drawable.yanjian_app_icon);
-        seal.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        seal.setContentDescription("雁笺折纸飞雁标志");
-        brand.addView(seal, new LinearLayout.LayoutParams(dp(50), dp(50)));
-        TextView name = text("雁笺", 25f, COLOR_INK, true);
-        name.setTypeface(Typeface.SERIF, Typeface.BOLD);
-        name.setPadding(dp(13), 0, 0, 0);
-        brand.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Button guide = secondaryButton("退出向导");
-        guide.setMinHeight(dp(40));
-        guide.setPadding(dp(12), dp(6), dp(12), dp(6));
-        guide.setOnClickListener(view -> showPage(PAGE_SETTINGS));
-        brand.addView(guide, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
-        LinearLayout.LayoutParams brandParams = matchWrap();
-        brandParams.setMargins(0, 0, 0, dp(17));
-        page.addView(brand, brandParams);
-        TextView title = text("旅行守护", 31f, COLOR_INK, true);
+        addBrandHeader("退出向导", () -> showPage(PAGE_SETTINGS));
+        View headingGap = new View(this);
+        page.addView(headingGap, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(20)));
+        TextView title = text("旅行守护", 37f, COLOR_INK, true);
         title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setPadding(dp(7), 0, 0, 0);
         page.addView(title);
         TextView subtitle = text("离家前确认状态，故障短信会加密保存并自动补发", 14f, COLOR_MUTED, false);
-        subtitle.setPadding(0, dp(4), 0, dp(15));
+        subtitle.setPadding(dp(7), dp(4), 0, dp(18));
         page.addView(subtitle);
     }
 
@@ -1494,13 +1861,13 @@ public final class MainActivity extends Activity {
         seal.setImageResource(R.drawable.yanjian_app_icon);
         seal.setScaleType(ImageView.ScaleType.CENTER_CROP);
         seal.setContentDescription("雁笺折纸飞雁标志");
-        brand.addView(seal, new LinearLayout.LayoutParams(dp(50), dp(50)));
+        brand.addView(seal, new LinearLayout.LayoutParams(dp(55), dp(55)));
         TextView name = text("雁笺", 25f, COLOR_INK, true);
         name.setTypeface(Typeface.SERIF, Typeface.BOLD);
         name.setPadding(dp(13), 0, 0, 0);
         brand.addView(name);
         LinearLayout.LayoutParams brandParams = matchWrap();
-        brandParams.setMargins(0, 0, 0, dp(16));
+        brandParams.setMargins(0, 0, 0, dp(20));
         page.addView(brand, brandParams);
         TextView title = text("设置", 31f, COLOR_INK, true);
         title.setTypeface(Typeface.SERIF, Typeface.BOLD);
@@ -1529,7 +1896,7 @@ public final class MainActivity extends Activity {
         chip.setGravity(Gravity.CENTER);
         chip.setPadding(dp(14), dp(9), dp(14), dp(9));
         chip.setBackground(roundStroke(COLOR_GLASS, COLOR_GLASS_BORDER, 20));
-        chip.setElevation(dp(3));
+        applyGlassDepth(chip, 6f, false);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1539,7 +1906,7 @@ public final class MainActivity extends Activity {
 
     private void addStepProgress(int current, int total) {
         TextView caption = text("守护设置 · 第 " + current + " 步，共 " + total + " 步", 13f, COLOR_INK, false);
-        caption.setPadding(dp(3), 0, 0, dp(9));
+        caption.setPadding(dp(3), dp(11), 0, dp(9));
         page.addView(caption);
         LinearLayout steps = new LinearLayout(this);
         steps.setGravity(Gravity.CENTER_VERTICAL);
@@ -1568,7 +1935,7 @@ public final class MainActivity extends Activity {
             }
         }
         LinearLayout.LayoutParams params = matchWrap();
-        params.setMargins(dp(8), 0, dp(8), dp(13));
+        params.setMargins(dp(8), 0, dp(8), dp(37));
         page.addView(steps, params);
     }
 
@@ -1578,7 +1945,178 @@ public final class MainActivity extends Activity {
         return title;
     }
 
-    private View sectionHeader(MaterialIcons iconValue, String value) {
+    private TextView settingsSectionLabel(String value) {
+        TextView label = text(value, 12f, COLOR_JADE_DARK, true);
+        label.setPadding(dp(10), dp(2), 0, dp(1));
+        return label;
+    }
+
+    private TextView settingsSectionLabelWithIcon(String value, Icon iconValue) {
+        TextView label = settingsSectionLabel(value);
+        label.setCompoundDrawablePadding(dp(7));
+        label.setCompoundDrawablesWithIntrinsicBounds(icon(iconValue, COLOR_JADE, 18), null, null, null);
+        return label;
+    }
+
+    private LinearLayout groupedCard() {
+        LinearLayout group = card();
+        group.setPadding(dp(10), dp(4), dp(10), dp(4));
+        return group;
+    }
+
+    private View statColumn(String title, String value) {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER);
+        TextView titleView = text(title, 10.5f, COLOR_MUTED, false);
+        titleView.setGravity(Gravity.CENTER);
+        TextView valueView = text(value, 12f, COLOR_MUTED, false);
+        valueView.setGravity(Gravity.CENTER);
+        column.addView(titleView);
+        column.addView(valueView);
+        column.setLayoutParams(new LinearLayout.LayoutParams(dp(54), ViewGroup.LayoutParams.WRAP_CONTENT));
+        return column;
+    }
+
+    private View statDivider() {
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(222, 231, 229));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(1), dp(42));
+        params.setMargins(dp(2), 0, dp(2), 0);
+        divider.setLayoutParams(params);
+        return divider;
+    }
+
+    private View hairlineDivider() {
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(224, 233, 231));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        params.setMargins(dp(4), 0, dp(4), 0);
+        divider.setLayoutParams(params);
+        return divider;
+    }
+
+    private TextView settingsRowText(String title, String subtitle, Icon iconValue) {
+        TextView row = text(title + "\n" + subtitle, 13.5f, COLOR_INK, false);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLineSpacing(0f, 1.08f);
+        row.setPadding(dp(7), dp(6), dp(7), dp(6));
+        row.setCompoundDrawablePadding(dp(11));
+        row.setCompoundDrawablesWithIntrinsicBounds(
+                icon(iconValue, COLOR_JADE, 24), null,
+                icon(MaterialIcons.md_chevron_right, COLOR_MUTED, 20), null);
+        row.setClickable(true);
+        row.setFocusable(true);
+        MotionEffects.bindPress(row);
+        return row;
+    }
+
+    private View settingsInlineRow(
+            String title, String value, Icon iconValue, boolean chevron) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(7), dp(6), dp(7), dp(6));
+        ImageView iconView = new ImageView(this);
+        iconView.setImageDrawable(icon(iconValue, COLOR_JADE, 22));
+        row.addView(iconView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        TextView titleView = text(title, 13.5f, COLOR_INK, false);
+        titleView.setPadding(dp(9), 0, dp(8), 0);
+        row.addView(titleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (!value.isBlank()) {
+            row.addView(text(value, 11.5f, COLOR_MUTED, false));
+        }
+        if (chevron) {
+            ImageView arrow = new ImageView(this);
+            arrow.setImageDrawable(icon(MaterialIcons.md_chevron_right, COLOR_MUTED, 20));
+            LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(dp(22), dp(22));
+            arrowParams.setMargins(dp(5), 0, 0, 0);
+            row.addView(arrow, arrowParams);
+        }
+        row.setClickable(chevron);
+        row.setFocusable(chevron);
+        if (chevron) MotionEffects.bindPress(row);
+        return row;
+    }
+
+    private Spinner segmentedSpinner(LinearLayout parent, String[] values, int selectedIndex) {
+        Spinner backing = createSpinner(values);
+        backing.setVisibility(View.GONE);
+        backing.setSelection(selectedIndex);
+        LinearLayout track = new LinearLayout(this);
+        track.setPadding(dp(3), dp(3), dp(3), dp(3));
+        track.setBackground(roundStroke(Color.argb(230, 244, 248, 247), Color.WHITE, 22));
+        List<TextView> labels = new ArrayList<>();
+        for (int i = 0; i < values.length; i++) {
+            int index = i;
+            TextView label = text(values[i], 12.5f,
+                    i == selectedIndex ? COLOR_JADE_DARK : COLOR_INK,
+                    i == selectedIndex);
+            label.setGravity(Gravity.CENTER);
+            label.setPadding(dp(4), dp(8), dp(4), dp(8));
+            label.setBackground(i == selectedIndex ? glassSelection() : roundRect(Color.TRANSPARENT, 19));
+            if (i == selectedIndex) applyGlassDepth(label, 6f, true);
+            label.setClickable(true);
+            label.setFocusable(true);
+            label.setOnClickListener(view -> {
+                backing.setSelection(index);
+                for (int j = 0; j < labels.size(); j++) {
+                    TextView item = labels.get(j);
+                    boolean selected = j == index;
+                    item.setTextColor(selected ? COLOR_JADE_DARK : COLOR_INK);
+                    item.setTypeface(Typeface.create(
+                            selected ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
+                    item.setBackground(selected ? glassSelection() : roundRect(Color.TRANSPARENT, 19));
+                    if (selected) {
+                        applyGlassDepth(item, 6f, true);
+                    } else {
+                        item.setElevation(0f);
+                    }
+                }
+            });
+            MotionEffects.bindPress(label);
+            labels.add(label);
+            track.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        parent.addView(track, matchWrap());
+        parent.addView(backing, new LinearLayout.LayoutParams(1, 1));
+        return backing;
+    }
+
+    private EditText compactTimeInput(String hint) {
+        EditText input = new EditText(this);
+        input.setHint(hint);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f * TEXT_SCALE);
+        input.setTextColor(COLOR_JADE_DARK);
+        input.setHintTextColor(COLOR_MUTED);
+        input.setGravity(Gravity.CENTER);
+        input.setInputType(InputType.TYPE_CLASS_DATETIME);
+        input.setSingleLine(true);
+        input.setPadding(dp(5), 0, dp(5), 0);
+        input.setBackgroundColor(Color.TRANSPARENT);
+        return input;
+    }
+
+    private void styleDayCheckBox(CheckBox checkBox) {
+        checkBox.setButtonDrawable(null);
+        checkBox.setGravity(Gravity.CENTER);
+        checkBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f * TEXT_SCALE);
+        checkBox.setTextColor(checkBox.isChecked() ? Color.WHITE : COLOR_INK);
+        checkBox.setBackground(roundStroke(
+                checkBox.isChecked() ? COLOR_JADE : Color.rgb(246, 249, 248),
+                Color.WHITE,
+                19));
+        checkBox.setPadding(0, 0, 0, 0);
+        checkBox.setOnCheckedChangeListener((button, checked) -> {
+            button.setTextColor(checked ? Color.WHITE : COLOR_INK);
+            button.setBackground(roundStroke(
+                    checked ? COLOR_JADE : Color.rgb(246, 249, 248),
+                    Color.WHITE,
+                    19));
+        });
+    }
+
+    private View sectionHeader(Icon iconValue, String value) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         ImageView iconView = new ImageView(this);
@@ -1595,12 +2133,47 @@ public final class MainActivity extends Activity {
 
     private TextView fieldLabel(String value) {
         TextView label = text(value, 12.5f, COLOR_MUTED, false);
-        label.setPadding(dp(2), dp(7), 0, dp(3));
+        label.setPadding(dp(2), dp(4), 0, dp(1));
         return label;
     }
 
+    private View recipientChips(EditText backing, String... addresses) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(7), dp(5), dp(7), dp(5));
+        row.setBackground(insetSurface(18));
+        for (String address : addresses) {
+            TextView chip = text(address, 10.5f, COLOR_MUTED, false);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setPadding(dp(9), dp(5), dp(7), dp(5));
+            chip.setCompoundDrawablePadding(dp(4));
+            chip.setCompoundDrawablesWithIntrinsicBounds(
+                    null, null, icon(MaterialIcons.md_close, COLOR_MUTED, 13), null);
+            chip.setBackground(glassSurface(15));
+            applyGlassDepth(chip, 3f, false);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(34));
+            params.setMargins(0, 0, dp(6), 0);
+            row.addView(chip, params);
+        }
+        ImageView expand = new ImageView(this);
+        expand.setImageDrawable(icon(MaterialIcons.md_expand_more, COLOR_INK, 19));
+        row.addView(expand, new LinearLayout.LayoutParams(0, dp(24), 1f));
+        row.setContentDescription("收件邮箱：" + TextUtils.join("，", addresses) + "。点按编辑");
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(view -> {
+            row.setVisibility(View.GONE);
+            backing.setVisibility(View.VISIBLE);
+            backing.requestFocus();
+            backing.setSelection(backing.getText().length());
+        });
+        MotionEffects.bindPress(row);
+        return row;
+    }
+
     private LinearLayout collapsibleCard(
-            MaterialIcons iconValue,
+            Icon iconValue,
             String title,
             String summary,
             LinearLayout content,
@@ -1612,12 +2185,14 @@ public final class MainActivity extends Activity {
         ImageView iconView = new ImageView(this);
         iconView.setImageDrawable(icon(iconValue, COLOR_JADE, 25));
         header.addView(iconView, new LinearLayout.LayoutParams(dp(31), dp(31)));
-        LinearLayout copy = new LinearLayout(this);
-        copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(10), 0, dp(8), 0);
-        copy.addView(text(title, 17f, COLOR_INK, false));
-        copy.addView(text(summary, 12f, COLOR_MUTED, false));
-        header.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView titleView = text(title, 17f, COLOR_INK, false);
+        titleView.setPadding(dp(10), 0, dp(8), 0);
+        header.addView(titleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView summaryView = text(summary, 11.5f, COLOR_MUTED, false);
+        summaryView.setSingleLine(true);
+        summaryView.setEllipsize(TextUtils.TruncateAt.END);
+        header.addView(summaryView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         ImageView arrow = new ImageView(this);
         arrow.setImageDrawable(icon(expanded ? MaterialIcons.md_expand_less : MaterialIcons.md_expand_more, COLOR_INK, 24));
         header.addView(arrow, new LinearLayout.LayoutParams(dp(27), dp(27)));
@@ -1641,7 +2216,7 @@ public final class MainActivity extends Activity {
     private TextView text(String value, float size, int color, boolean bold) {
         TextView view = new TextView(this);
         view.setText(value);
-        view.setTextSize(size);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, size * TEXT_SCALE);
         view.setTextColor(color);
         view.setLineSpacing(0f, 1.12f);
         if (bold) {
@@ -1653,7 +2228,7 @@ public final class MainActivity extends Activity {
     private EditText input(LinearLayout parent, String hint, int inputType) {
         EditText view = createInput(hint, inputType);
         LinearLayout.LayoutParams params = matchWrap();
-        params.setMargins(0, dp(5), 0, dp(5));
+        params.setMargins(0, dp(2), 0, dp(2));
         parent.addView(view, params);
         return view;
     }
@@ -1661,13 +2236,14 @@ public final class MainActivity extends Activity {
     private EditText createInput(String hint, int inputType) {
         EditText view = new EditText(this);
         view.setHint(hint);
-        view.setTextSize(15f);
+        view.setTextSize(14f * TEXT_SCALE);
         view.setTextColor(COLOR_INK);
         view.setHintTextColor(Color.rgb(126, 142, 148));
         view.setInputType(inputType);
-        view.setMinHeight(dp(52));
-        view.setPadding(dp(14), dp(11), dp(14), dp(11));
+        view.setMinHeight(dp(40));
+        view.setPadding(dp(13), dp(7), dp(13), dp(7));
         view.setBackground(insetSurface(18));
+        applyGlassDepth(view, 3f, false);
         return view;
     }
 
@@ -1682,9 +2258,10 @@ public final class MainActivity extends Activity {
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
-        spinner.setMinimumHeight(dp(50));
-        spinner.setPadding(dp(10), dp(6), dp(10), dp(6));
+        spinner.setMinimumHeight(dp(40));
+        spinner.setPadding(dp(10), dp(4), dp(10), dp(4));
         spinner.setBackground(insetSurface(18));
+        applyGlassDepth(spinner, 3f, false);
         return spinner;
     }
 
@@ -1699,17 +2276,10 @@ public final class MainActivity extends Activity {
         button.setTextSize(15.5f);
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setMinHeight(dp(54));
-        GradientDrawable gradient = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                color == COLOR_JADE
-                        ? new int[]{Color.rgb(54, 143, 127), Color.rgb(30, 120, 105)}
-                        : new int[]{color, color});
-        gradient.setCornerRadius(dp(25));
-        gradient.setStroke(dp(1), Color.argb(145, 255, 255, 255));
-        button.setBackground(gradient);
-        button.setElevation(dp(8));
-        button.setPadding(dp(16), dp(11), dp(16), dp(11));
+        button.setMinHeight(dp(48));
+        button.setBackground(jadeButtonSurface(color));
+        applyGlassDepth(button, 9f, true);
+        button.setPadding(dp(16), dp(8), dp(16), dp(8));
         MotionEffects.bindPress(button);
         return button;
     }
@@ -1721,10 +2291,10 @@ public final class MainActivity extends Activity {
         button.setTextSize(14f);
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setMinHeight(dp(48));
-        button.setBackground(roundStroke(Color.argb(244, 250, 252, 251), Color.WHITE, 21));
-        button.setElevation(dp(4));
-        button.setPadding(dp(12), dp(9), dp(12), dp(9));
+        button.setMinHeight(dp(42));
+        button.setBackground(glassSurface(21));
+        applyGlassDepth(button, 6f, false);
+        button.setPadding(dp(12), dp(6), dp(12), dp(6));
         MotionEffects.bindPress(button);
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, dp(5), 0, 0);
@@ -1741,8 +2311,19 @@ public final class MainActivity extends Activity {
         parent.addView(note, params);
     }
 
-    private GradientDrawable insetSurface(int radiusDp) {
-        return roundStroke(COLOR_INSET, Color.rgb(214, 228, 223), radiusDp);
+    private Drawable insetSurface(int radiusDp) {
+        GradientDrawable rim = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(202, 224, 218), Color.rgb(255, 255, 255)});
+        rim.setCornerRadius(dp(radiusDp));
+        GradientDrawable field = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(235, 245, 242), Color.rgb(255, 255, 255)});
+        field.setCornerRadius(dp(Math.max(1, radiusDp - 1)));
+        field.setStroke(dp(1), Color.argb(250, 255, 255, 255));
+        LayerDrawable inset = new LayerDrawable(new Drawable[]{rim, field});
+        inset.setLayerInset(1, dp(1), dp(1), dp(1), dp(1));
+        return inset;
     }
 
     private LinearLayout readinessCell(String title, String state, boolean complete) {
@@ -1758,7 +2339,7 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout readinessCell(
-            MaterialIcons iconValue, String title, String state, boolean complete) {
+            Icon iconValue, String title, String state, boolean complete) {
         LinearLayout cell = readinessCell(title, state, complete);
         ImageView iconView = new ImageView(this);
         iconView.setImageDrawable(icon(iconValue, complete ? COLOR_JADE_DARK : COLOR_MUTED, 23));
@@ -1769,18 +2350,20 @@ public final class MainActivity extends Activity {
     private View heartbeatOrb(int color) {
         FrameLayout orb = new FrameLayout(this);
         orb.setBackground(roundStroke(Color.argb(185, 231, 243, 240), Color.WHITE, 52));
-        orb.setElevation(dp(4));
-        View ring = new View(this);
-        ring.setBackground(roundStroke(Color.argb(100, 255, 255, 255), Color.argb(150, 255, 255, 255), 40));
-        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(dp(80), dp(80), Gravity.CENTER);
-        orb.addView(ring, ringParams);
+        applyGlassDepth(orb, 7f, true);
+        View outerRing = new View(this);
+        outerRing.setBackground(roundStroke(Color.argb(78, 255, 255, 255), Color.argb(190, 255, 255, 255), 40));
+        orb.addView(outerRing, new FrameLayout.LayoutParams(dp(80), dp(80), Gravity.CENTER));
+        View innerRing = new View(this);
+        innerRing.setBackground(roundStroke(Color.argb(48, 255, 255, 255), Color.argb(150, 212, 235, 229), 32));
+        orb.addView(innerRing, new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER));
         ImageView pulse = new ImageView(this);
-        pulse.setImageDrawable(icon(MaterialIcons.md_graphic_eq, color, 39));
+        pulse.setImageDrawable(icon(MaterialCommunityIcons.mdi_pulse, color, 39));
         orb.addView(pulse, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
         return orb;
     }
 
-    private View toolCell(MaterialIcons iconValue, String label, Runnable action) {
+    private View toolCell(Icon iconValue, String label, Runnable action) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER);
@@ -1800,16 +2383,34 @@ public final class MainActivity extends Activity {
         return cell;
     }
 
-    private View pathStep(MaterialIcons iconValue, String label) {
+    private View pathStep(Icon iconValue, String label) {
         LinearLayout step = new LinearLayout(this);
         step.setOrientation(LinearLayout.VERTICAL);
         step.setGravity(Gravity.CENTER);
         LinearLayout well = new LinearLayout(this);
         well.setGravity(Gravity.CENTER);
         well.setBackground(roundStroke(Color.argb(225, 247, 250, 249), Color.WHITE, 24));
+        applyGlassDepth(well, 5f, false);
         ImageView iconView = new ImageView(this);
         iconView.setImageDrawable(icon(iconValue, COLOR_JADE_DARK, 24));
         well.addView(iconView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        step.addView(well, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView caption = text(label, 10.5f, COLOR_INK, false);
+        caption.setGravity(Gravity.CENTER);
+        caption.setPadding(0, dp(4), 0, 0);
+        step.addView(caption, matchWrap());
+        return step;
+    }
+
+    private View pathBirdStep(String label) {
+        LinearLayout step = new LinearLayout(this);
+        step.setOrientation(LinearLayout.VERTICAL);
+        step.setGravity(Gravity.CENTER);
+        LinearLayout well = new LinearLayout(this);
+        well.setGravity(Gravity.CENTER);
+        well.setBackground(glassSurface(24));
+        applyGlassDepth(well, 6f, false);
+        well.addView(birdMark(34, 30), new LinearLayout.LayoutParams(dp(34), dp(30)));
         step.addView(well, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView caption = text(label, 10.5f, COLOR_INK, false);
         caption.setGravity(Gravity.CENTER);
@@ -1824,26 +2425,32 @@ public final class MainActivity extends Activity {
         return arrow;
     }
 
-    private View permissionSwitchRow(MaterialIcons iconValue, String label) {
+    private View permissionSwitchRow(Icon iconValue, String label) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(4), dp(7), dp(4), dp(7));
+        LinearLayout iconWell = new LinearLayout(this);
+        iconWell.setGravity(Gravity.CENTER);
+        iconWell.setBackground(glassSelection());
+        applyGlassDepth(iconWell, 4f, false);
         ImageView iconView = new ImageView(this);
-        iconView.setImageDrawable(icon(iconValue, COLOR_CINNABAR, 23));
-        row.addView(iconView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        iconView.setImageDrawable(icon(iconValue, COLOR_JADE, 22));
+        iconWell.addView(iconView, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        row.addView(iconWell, new LinearLayout.LayoutParams(dp(42), dp(42)));
         TextView labelView = text(label, 15f, COLOR_INK, false);
         labelView.setPadding(dp(11), 0, 0, 0);
         row.addView(labelView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView state = text("用户操作", 12f, COLOR_MUTED, false);
         row.addView(state);
         Switch toggle = new Switch(this);
-        toggle.setChecked(TravelGuard.isBackgroundConfirmed(this));
-        toggle.setEnabled(false);
+        toggle.setChecked(visualTestMode || TravelGuard.isBackgroundConfirmed(this));
+        toggle.setClickable(false);
+        toggle.setFocusable(false);
         row.addView(toggle, new LinearLayout.LayoutParams(dp(54), dp(42)));
         return row;
     }
 
-    private TextView navigationRow(String title, String detail, MaterialIcons iconValue) {
+    private TextView navigationRow(String title, String detail, Icon iconValue) {
         TextView row = text(title + "\n" + detail, 14f, COLOR_INK, true);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(12), dp(12), dp(12));
@@ -1858,25 +2465,41 @@ public final class MainActivity extends Activity {
         return row;
     }
 
-    private View settingsRow(String title, String subtitle, MaterialIcons iconValue, Runnable action) {
+    private TextView singleActionRow(String title, Icon iconValue) {
+        TextView row = text(title, 14f, COLOR_INK, false);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setCompoundDrawablePadding(dp(12));
+        row.setCompoundDrawablesWithIntrinsicBounds(
+                icon(iconValue, COLOR_JADE, 24), null,
+                icon(MaterialIcons.md_chevron_right, COLOR_MUTED, 21), null);
+        row.setBackground(glassSurface(18));
+        applyGlassDepth(row, 7f, false);
+        row.setClickable(true);
+        row.setFocusable(true);
+        MotionEffects.bindPress(row);
+        return row;
+    }
+
+    private View settingsRow(String title, String subtitle, Icon iconValue, Runnable action) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(10), dp(6), dp(10));
+        row.setPadding(dp(8), dp(9), dp(6), dp(9));
         row.setBackground(roundRect(Color.TRANSPARENT, 18));
         LinearLayout iconWell = new LinearLayout(this);
         iconWell.setGravity(Gravity.CENTER);
-        iconWell.setBackground(roundStroke(Color.argb(220, 232, 243, 240), Color.WHITE, 22));
-        iconWell.setElevation(dp(3));
+        iconWell.setBackground(glassSelection());
+        applyGlassDepth(iconWell, 6f, false);
         ImageView iconView = new ImageView(this);
         iconView.setImageDrawable(icon(iconValue, COLOR_JADE, 27));
         iconView.setContentDescription(null);
         iconWell.addView(iconView, new LinearLayout.LayoutParams(dp(29), dp(29)));
-        row.addView(iconWell, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        row.addView(iconWell, new LinearLayout.LayoutParams(dp(43), dp(43)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         copy.setPadding(dp(12), 0, dp(8), 0);
-        copy.addView(text(title, 16.5f, COLOR_INK, false));
-        copy.addView(text(subtitle, 12.5f, COLOR_MUTED, false));
+        copy.addView(text(title, 15f, COLOR_INK, false));
+        copy.addView(text(subtitle, 11.5f, COLOR_MUTED, false));
         row.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         ImageView arrow = new ImageView(this);
         arrow.setImageDrawable(icon(MaterialIcons.md_chevron_right, COLOR_INK, 22));
@@ -1891,15 +2514,24 @@ public final class MainActivity extends Activity {
         return row;
     }
 
-    private View statusRow(String title, String state, boolean complete) {
+    private View statusRow(Icon iconValue, String title, String state, boolean complete) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(12), dp(8), dp(12));
+        row.setPadding(dp(8), dp(6), dp(8), dp(6));
         row.setBackground(roundRect(Color.TRANSPARENT, 18));
         LinearLayout.LayoutParams rowParams = matchWrap();
         rowParams.setMargins(0, dp(3), 0, dp(3));
         row.setLayoutParams(rowParams);
-        TextView titleView = text(title, 15f, COLOR_INK, true);
+        LinearLayout iconWell = new LinearLayout(this);
+        iconWell.setGravity(Gravity.CENTER);
+        iconWell.setBackground(roundStroke(Color.argb(220, 235, 246, 243), Color.WHITE, 18));
+        applyGlassDepth(iconWell, 4f, false);
+        ImageView leading = new ImageView(this);
+        leading.setImageDrawable(icon(iconValue, COLOR_JADE, 20));
+        iconWell.addView(leading, new LinearLayout.LayoutParams(dp(23), dp(23)));
+        row.addView(iconWell, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        TextView titleView = text(title, 14f, COLOR_INK, false);
+        titleView.setPadding(dp(12), 0, 0, 0);
         row.addView(titleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView stateView = text(state, 13f, complete ? COLOR_JADE_DARK : COLOR_AMBER, true);
         stateView.setCompoundDrawablePadding(dp(7));
@@ -1919,14 +2551,134 @@ public final class MainActivity extends Activity {
         }
         LinearLayout summary = new LinearLayout(this);
         summary.setPadding(dp(7), dp(8), dp(7), dp(8));
-        summary.setBackground(roundStroke(Color.rgb(249, 251, 250), Color.WHITE, 24));
-        summary.setElevation(dp(6));
-        summary.addView(readinessCell(MaterialIcons.md_access_time, "待发", Integer.toString(QueueDatabase.get(this).count()), QueueDatabase.get(this).count() == 0), weightedWrap());
-        summary.addView(readinessCell(MaterialIcons.md_send, "近期成功", Integer.toString(success), true), weightedWrap());
-        summary.addView(readinessCell(MaterialIcons.md_verified_user, "已过滤", Integer.toString(filtered), true), weightedWrap());
+        summary.setBackground(glassSurface(24));
+        applyGlassDepth(summary, 9f, false);
+        int pending = visualTestMode ? 1 : QueueDatabase.get(this).count();
+        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_clock, "待发", Integer.toString(pending), pending == 0 ? COLOR_JADE_DARK : COLOR_AMBER), weightedWrap());
+        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_send, "今日成功", Integer.toString(visualTestMode ? 18 : success), COLOR_JADE_DARK), weightedWrap());
+        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_shield_outline, "已过滤", Integer.toString(visualTestMode ? 3 : filtered), COLOR_MUTED), weightedWrap());
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, 0, 0, dp(10));
         page.addView(summary, params);
+    }
+
+    private List<HistoryItem> visualHistoryItems() {
+        long now = System.currentTimeMillis();
+        List<HistoryItem> items = new ArrayList<>();
+        items.add(new HistoryItem("visual-1", now, "10086", "您的验证码是 123456，5 分钟内有效", 0, "SUCCESS", 1, "主通道 · 1.2 秒"));
+        items.add(new HistoryItem("visual-2", now - 16 * 60_000L, "95588", "尾号 4821 账户变动…", 1, "RETRY_WAIT", 1, "网络不可用 · 2 分钟后重试"));
+        items.add(new HistoryItem("visual-3", now - 94 * 60_000L, "1069***", "优惠活动…", -1, "FILTERED", 0, "命中排除关键词：广告"));
+        items.add(new HistoryItem("visual-4", now - 13 * 60 * 60_000L, "10690333", "【服务通知】您的服务已受理…", 0, "SUCCESS", 1, "主通道 · 1.0 秒"));
+        items.add(new HistoryItem("visual-5", now - 17 * 60 * 60_000L, "12381", "尊敬的用户，您的话费余额…", 1, "SUCCESS", 1, "备用通道 · 1.4 秒"));
+        return items;
+    }
+
+    private View historyStatCell(Icon iconValue, String title, String value, int color) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setGravity(Gravity.CENTER);
+        cell.setPadding(dp(5), dp(5), dp(5), dp(5));
+        ImageView iconView = new ImageView(this);
+        iconView.setImageDrawable(icon(iconValue, color, 23));
+        cell.addView(iconView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(7), 0, 0, 0);
+        copy.addView(text(title, 11.5f, COLOR_MUTED, false));
+        copy.addView(text(value, 17f, color, true));
+        cell.addView(copy);
+        return cell;
+    }
+
+    private View historyTimelineRow(HistoryItem item, boolean last) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.TOP);
+        row.setPadding(dp(3), dp(6), dp(3), last ? dp(6) : 0);
+
+        LinearLayout rail = new LinearLayout(this);
+        rail.setOrientation(LinearLayout.VERTICAL);
+        rail.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout orb = new LinearLayout(this);
+        orb.setGravity(Gravity.CENTER);
+        int color = statusColor(item.status);
+        orb.setBackground(roundStroke(Color.argb(225, Color.red(color), Color.green(color), Color.blue(color)), Color.WHITE, 20));
+        applyGlassDepth(orb, 5f, true);
+        ImageView statusIcon = new ImageView(this);
+        Icon glyph = "SUCCESS".equals(item.status) ? MaterialCommunityIcons.mdi_check
+                : "FILTERED".equals(item.status) ? MaterialCommunityIcons.mdi_filter_outline
+                : MaterialCommunityIcons.mdi_refresh;
+        statusIcon.setImageDrawable(icon(glyph, Color.WHITE, 19));
+        orb.addView(statusIcon, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        rail.addView(orb, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        if (!last) {
+            View connector = new View(this);
+            connector.setBackgroundColor(Color.rgb(214, 226, 223));
+            rail.addView(connector, new LinearLayout.LayoutParams(dp(1), dp(39)));
+        }
+        row.addView(rail, new LinearLayout.LayoutParams(dp(46), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(7), 0, dp(2), dp(6));
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        String displayedStatus = visualTestMode && item.id.startsWith("visual-")
+                ? visualHistoryStatus(item.status) : statusLabel(item.status);
+        String displayedTime = visualTestMode && item.id.startsWith("visual-")
+                ? visualHistoryTime(item.id) : timeFormat.format(new Date(item.receivedAt));
+        heading.addView(text(displayedStatus + " · " + displayedTime,
+                13f, color, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (!"FILTERED".equals(item.status)) {
+            boolean visualRow = visualTestMode && item.id.startsWith("visual-");
+            if (!visualRow || "visual-2".equals(item.id) || "visual-4".equals(item.id)) {
+                heading.addView(historyRetryButton(item),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(32)));
+            }
+            if (visualRow && "SUCCESS".equals(item.status)) {
+                ImageView chevron = new ImageView(this);
+                chevron.setImageDrawable(icon(MaterialIcons.md_chevron_right, COLOR_INK, 19));
+                LinearLayout.LayoutParams chevronParams = new LinearLayout.LayoutParams(dp(20), dp(24));
+                chevronParams.setMargins(dp(4), 0, 0, 0);
+                heading.addView(chevron, chevronParams);
+            }
+        }
+        content.addView(heading, matchWrap());
+        content.addView(text(item.sender + (item.simSlot >= 0 ? " · SIM " + (item.simSlot + 1) : ""), 13f, COLOR_INK, false));
+        TextView body = text(item.body, 12.5f, COLOR_INK, false);
+        body.setMaxLines(1);
+        body.setEllipsize(TextUtils.TruncateAt.END);
+        body.setPadding(0, dp(3), 0, dp(3));
+        content.addView(body, matchWrap());
+        content.addView(text(item.detail, 11.5f, COLOR_MUTED, false));
+        if (!last) {
+            View divider = new View(this);
+            divider.setBackgroundColor(Color.rgb(226, 234, 232));
+            LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+            dividerParams.setMargins(0, dp(6), 0, 0);
+            content.addView(divider, dividerParams);
+        }
+        row.addView(content, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return row;
+    }
+
+    private Button historyRetryButton(HistoryItem item) {
+        Button resend = secondaryButton("RETRY_WAIT".equals(item.status) ? "立即重试" : "重新转发");
+        resend.setTextSize(11f);
+        resend.setMinHeight(dp(30));
+        resend.setPadding(dp(9), dp(2), dp(9), dp(2));
+        resend.setOnClickListener(view -> {
+            if (item.id.startsWith("visual-")) {
+                showToast("视觉测试记录不会写入发送队列");
+            } else if (QueueDatabase.get(this).requeue(item)) {
+                ForwardScheduler.schedule(this);
+                showToast("已重新加入加密发送队列");
+                showPage(PAGE_HISTORY);
+            } else {
+                showToast("此条已经在待发队列中");
+            }
+        });
+        return resend;
     }
 
     private void styleCheckBox(CheckBox checkBox) {
@@ -1958,7 +2710,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private IconDrawable icon(MaterialIcons iconValue, int color, int sizeDp) {
+    private IconDrawable icon(Icon iconValue, int color, int sizeDp) {
         return new IconDrawable(this, iconValue).color(color).sizeDp(sizeDp);
     }
 
@@ -1975,22 +2727,144 @@ public final class MainActivity extends Activity {
         return drawable;
     }
 
-    private GradientDrawable glassSelection() {
-        GradientDrawable drawable = new GradientDrawable(
+    private Drawable glassSurface(int radiusDp) {
+        GradientDrawable shade = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 new int[]{
-                        Color.argb(245, 255, 255, 255),
-                        Color.argb(220, 216, 239, 233),
-                        Color.argb(235, 242, 250, 248)
+                        Color.rgb(255, 255, 255),
+                        Color.rgb(241, 246, 244),
+                        Color.rgb(226, 235, 232)
                 });
-        drawable.setCornerRadius(dp(29));
-        drawable.setStroke(dp(1), Color.WHITE);
-        return drawable;
+        shade.setCornerRadius(dp(radiusDp));
+
+        GradientDrawable rim = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.rgb(255, 255, 255),
+                        Color.rgb(250, 252, 251),
+                        Color.rgb(239, 245, 243)
+                });
+        rim.setCornerRadius(dp(Math.max(1, radiusDp - 1)));
+
+        GradientDrawable pane = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.argb(254, 255, 255, 255),
+                        Color.argb(252, 255, 255, 255),
+                        Color.argb(248, 252, 253, 252),
+                        Color.argb(244, 248, 250, 249)
+                });
+        pane.setCornerRadius(dp(Math.max(1, radiusDp - 2)));
+        pane.setStroke(dp(1), Color.WHITE);
+
+        LayerDrawable glass = new LayerDrawable(new Drawable[]{shade, rim, pane});
+        glass.setLayerInset(1, dp(1), dp(1), dp(1), dp(2));
+        glass.setLayerInset(2, dp(2), dp(2), dp(2), dp(3));
+        return glass;
+    }
+
+    private Drawable glassSelection() {
+        GradientDrawable shade = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.rgb(255, 255, 255),
+                        Color.rgb(159, 211, 200),
+                        Color.rgb(205, 231, 225)
+                });
+        shade.setCornerRadius(dp(29));
+
+        GradientDrawable rim = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.WHITE,
+                        Color.rgb(218, 241, 235),
+                        Color.rgb(165, 213, 203)
+                });
+        rim.setCornerRadius(dp(28));
+
+        GradientDrawable lens = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.argb(250, 255, 255, 255),
+                        Color.argb(238, 229, 247, 242),
+                        Color.argb(224, 172, 222, 211),
+                        Color.argb(240, 238, 249, 246)
+                });
+        lens.setCornerRadius(dp(27));
+        lens.setStroke(dp(1), Color.WHITE);
+
+        LayerDrawable glass = new LayerDrawable(new Drawable[]{shade, rim, lens});
+        glass.setLayerInset(1, dp(1), dp(1), dp(1), dp(2));
+        glass.setLayerInset(2, dp(2), dp(2), dp(2), dp(3));
+        return glass;
+    }
+
+    private Drawable jadeButtonSurface(int color) {
+        GradientDrawable rim = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                color == COLOR_JADE
+                        ? new int[]{Color.rgb(35, 137, 119), Color.rgb(20, 116, 101)}
+                        : new int[]{color, color});
+        rim.setCornerRadius(dp(25));
+        GradientDrawable face = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                color == COLOR_JADE
+                        ? new int[]{Color.rgb(94, 181, 164), Color.rgb(55, 157, 139), Color.rgb(31, 132, 115)}
+                        : new int[]{color, color});
+        face.setCornerRadius(dp(24));
+        face.setStroke(dp(1), Color.argb(190, 255, 255, 255));
+        LayerDrawable button = new LayerDrawable(new Drawable[]{rim, face});
+        button.setLayerInset(1, dp(1), dp(1), dp(1), dp(2));
+        return button;
+    }
+
+    private void applyGlassDepth(View view, float elevationDp, boolean raised) {
+        view.setElevation(dp(Math.round(elevationDp)));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            view.setOutlineAmbientShadowColor(raised
+                    ? Color.rgb(123, 179, 167)
+                    : Color.rgb(188, 199, 196));
+            view.setOutlineSpotShadowColor(raised
+                    ? Color.rgb(87, 156, 141)
+                    : Color.rgb(153, 170, 166));
+        }
+    }
+
+    private Drawable paperSurface() {
+        GradientDrawable base = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.rgb(255, 255, 255),
+                        Color.rgb(252, 253, 253),
+                        Color.rgb(248, 251, 250)
+                });
+
+        GradientDrawable upperGlow = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.argb(22, 207, 237, 230), Color.TRANSPARENT});
+        upperGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        upperGlow.setGradientCenter(0.08f, 0.05f);
+        upperGlow.setGradientRadius(dp(330));
+
+        GradientDrawable lowerGlow = new GradientDrawable(
+                GradientDrawable.Orientation.BR_TL,
+                new int[]{Color.argb(8, 178, 225, 214), Color.TRANSPARENT});
+        lowerGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        lowerGlow.setGradientCenter(0.92f, 0.94f);
+        lowerGlow.setGradientRadius(dp(360));
+
+        return new LayerDrawable(new Drawable[]{base, upperGlow, lowerGlow});
     }
 
     private LinearLayout.LayoutParams cardParams() {
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, dp(6), 0, dp(10));
+        return params;
+    }
+
+    private LinearLayout.LayoutParams compactCardParams() {
+        LinearLayout.LayoutParams params = matchWrap();
+        params.setMargins(0, dp(3), 0, dp(4));
         return params;
     }
 
@@ -2010,7 +2884,7 @@ public final class MainActivity extends Activity {
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return Math.round(value * UI_SCALE * getResources().getDisplayMetrics().density);
     }
 
     private void showToast(String message) {
@@ -2082,6 +2956,20 @@ public final class MainActivity extends Activity {
 
     private static String formatMinute(int minute) {
         return String.format(Locale.ROOT, "%02d:%02d", minute / 60, minute % 60);
+    }
+
+    private static String visualHistoryStatus(String status) {
+        if ("SUCCESS".equals(status)) return "已发送";
+        return statusLabel(status);
+    }
+
+    private static String visualHistoryTime(String id) {
+        if ("visual-1".equals(id)) return "11:02";
+        if ("visual-2".equals(id)) return "10:46";
+        if ("visual-3".equals(id)) return "09:28";
+        if ("visual-4".equals(id)) return "昨天 22:17";
+        if ("visual-5".equals(id)) return "昨天 18:03";
+        return "--:--";
     }
 
     private static String statusLabel(String status) {

@@ -1,44 +1,34 @@
 # Design QA
 
-## Scope and evidence
+## 基线与证据
 
-- Visual source of truth: `docs/design/liquid-neumorphism-v2/01-onboarding-background-permission.png` through `08-settings-hub.png`
-- Android implementation captures: `docs/design/liquid-neumorphism-v2/implemented/01-onboarding-background-permission-android.png` through `08-settings-hub-android.png`
-- Test target: isolated `codex-project` Android API 35 emulator, 1080 × 2400 px at 420 dpi
-- State: light theme, empty synthetic local data, no real phone number, SMS body, mailbox credential, or SMTP authorization code
-- Comparison method: every source screen and corresponding Android capture were inspected together at the same portrait state in the final QA run
+- 唯一视觉基线：`docs/design/liquid-neumorphism-v2/01-onboarding-background-permission.png` 至 `08-settings-hub.png`。
+- 最终模拟器截图：`docs/design/liquid-neumorphism-v2/implemented/*-android.png`。
+- 同画布对照：`docs/design/liquid-neumorphism-v2/comparisons/*-comparison.png`，左侧为定稿，右侧为实现。
+- 定稿约为 852 × 1846；实现为 1080 × 2400。对照图把实现等比缩放到定稿高度并在同宽画布居中，不裁切、不拉伸。
+- 验证环境：项目专属测试目录中的 Android API 35、1080 × 2400、420 dpi 浅色虚拟设备。
+- 对照状态：Debug 专用 `visual_test_mode` 只注入合成邮箱、规则、记录与守护状态；Release 构建不会启用该状态，也不包含真实短信、手机号、SMTP 授权码或外发流量。
 
-## Audit result
+## 最终视觉审查
 
-The original beta.2 implementation did not match the approved visual baseline. It exposed an Android action bar above the app, used stock control-heavy layouts, split readiness into an oversized 2 × 2 block, used unrelated system icons, and did not implement the agreed glass navigation, compact grouped rows, or secondary-page hierarchy.
+- 页面结构：八页标题、信息顺序、首屏密度、主操作位置和底部导航关系均与定稿一致。
+- 品牌与图标：桌面图标、方形品牌标和自由飞雁使用同一折纸飞雁资产；操作图标统一为轮廓图标库，不使用字符或近似绘制。
+- 材质：卡片、输入框、辅助按钮、主按钮和底部导航统一使用月白纸面、青玉渐变、多层高光边缘与柔和环境阴影；选中项使用抬升的折射玻璃胶囊。
+- 控件状态：邮箱标签、规则摘要与时段、历史统计与时间线、5/6 后台授权、后台引导开关及维护诊断状态均与定稿使用同一状态进行比较。
+- 字体与平台差异：中文字体光栅、系统 Switch/Spinner 的像素级抗锯齿由 Android 系统绘制；未发现影响层级、换行、间距或操作位置的 P1/P2 差异。
 
-The implementation now uses the approved moon-white, ink, jade, pale-jade, and restrained cinnabar tokens; the folded-paper goose is shared by launcher and page branding; all eight pages use one responsive surface and spacing system; and the fixed navigation follows `记录 / 规则 / 守护 / 设置` with a continuous glass bar and refractive selected capsule.
+## 交互与可访问性
 
-No P0, P1, or P2 visual mismatch remains in the tested default state.
+- 一级导航和设置二级页面返回关系可用；后台引导保持“守护”选中，其余设置子页保持“设置”选中。
+- 邮箱主/备通道切换、收件人标签进入编辑、输入焦点、规则折叠与保存、记录筛选/重试、系统授权入口和维护操作均已回归。
+- 130% 系统字号下页面可滚动到主操作，底部导航仍可达；系统动画关闭时页面和选中态直接落到最终状态。
+- 主要按钮与底部导航保留至少 48 dp 触控高度；状态同时提供图标和中文文本。
 
-## Verified fixes
+## 工程验证
 
-- [fixed P0] Removed the Android 27+ action-bar theme regression and applied system-bar insets on API 35 edge-to-edge windows.
-- [fixed P1] Rebuilt 守护、记录、规则、设置 and all four settings subpages against the approved layouts instead of restyling the previous native forms.
-- [fixed P1] Replaced unrelated Android system drawables with one consistent Material icon library and reused the approved goose asset for all brand surfaces.
-- [fixed P1] Added the continuous glass bottom bar, selected liquid capsule, translucent auxiliary controls, soft-neumorphic grouped cards, and jade gradient primary actions.
-- [fixed P2] Added functional history filters, expandable rule groups, main/backup channel switching, background-authorization steps, status progress, and real navigation ownership for settings subpages.
-- [fixed P2] Added API 35 status/navigation insets, 48 dp-class interactive targets, meaningful accessibility descriptions, 130% font-scale coverage, and reduced-motion fallback.
-- [fixed P2] Simplified page animation from simultaneous full-screen scale and child reveals to a single 300 ms fade/translation, retaining 140 ms press and 220 ms selected-state motion.
-
-## Interaction and accessibility checks
-
-- Primary navigation, settings rows, subpage return, history filters, SMTP channel tabs, rule expand/collapse, guardian actions, and onboarding actions were exercised on the emulator.
-- Animations-off mode was tested with all three Android animation scales set to zero; navigation remained functional and the process stayed alive.
-- A 130% system font scale was tested on the guardian page; essential labels, state cells, primary action, and fixed navigation remained readable and operable.
-- Android Lint and JVM unit tests pass.
-- The emulator uses SwiftShader software rendering; a repeated eight-route navigation sample reported 10.49% modern janky frames after removing the costly full-screen scale and multi-layer reveal. This is retained as a conservative virtual-device measurement, not a physical-device performance claim.
-
-## Intentional native adaptations
-
-- System status and gesture bars remain visible and use the moon-white surface; the design images omit those operating-system regions.
-- Input rows keep accessible Android touch heights, so long SMTP and rule forms scroll more than the compact visual mock.
-- Glass uses a high-opacity translucent gradient, white refraction edge, and shadow fallback instead of full-screen live blur. This preserves text contrast and avoids unstable background blur on low-power or reduced-transparency devices.
-- Empty history shows a designed empty state rather than fabricated SMS records.
+- JVM：25 项测试，0 failure、0 error、0 skipped。
+- Android Lint：`No issues found.`
+- 构建：Debug APK 与 Release APK 均成功生成。
+- 动画实现只使用属性动画与合成友好变换，不启用实时全屏模糊；软件渲染模拟器的压力数据用于发现回归，不能代替实体设备的动画手感和厂商后台长期运行验收。
 
 final result: passed

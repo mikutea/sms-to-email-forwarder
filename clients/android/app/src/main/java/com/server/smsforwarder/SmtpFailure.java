@@ -22,7 +22,7 @@ import javax.net.ssl.SSLHandshakeException;
 
 final class SmtpFailure {
     private static final Pattern SMTP_REPLY_CODE = Pattern.compile(
-            "(?im)(?:^\\s*|\\b(?:response|reply|return code)\\s*[:=]\\s*)([45]\\d{2})(?=\\s|[-:])");
+            "(?im)(?:^\\s*|\\b(?:response|reply|return code)\\s*[:=]\\s*)([45]\\d{2})(?:\\s|:|-|$)");
 
     private SmtpFailure() {
     }

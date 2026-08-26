@@ -21,10 +21,10 @@ android {
         applicationId = "com.server.smsforwarder"
         minSdk = 23
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.1.1-beta.2"
+        versionCode = 15
+        versionName = "1.1.1-beta.3"
 
-        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -101,4 +101,6 @@ dependencies {
     implementation("com.sun.mail:android-activation:1.6.8")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

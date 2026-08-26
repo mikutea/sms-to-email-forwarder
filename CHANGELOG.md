@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [1.1.1-beta.3] - 2026-08-26
+
+### Android / 鸿蒙测试邮件闪退修复
+
+- 修复 Beta 2 的 SMTP 返回码正则在 Android/HarmonyOS 运行时初始化失败，导致点按测试邮件后应用进程被系统终止的问题。
+- 将不兼容的正则前瞻改为 Android 全版本可执行的等价匹配，同时继续避免把端口 `465` 误判为 SMTP 返回码。
+- 新增 Android 设备端回归测试；该测试在旧实现上稳定触发 `ExceptionInInitializerError`，修复后通过。
+- 在 Android 15 / API 35 隔离虚拟设备完整复测“测试主通道 → 失败分类 → 页面保持运行”，确认无 `FATAL EXCEPTION`。
+
 ## [1.1.1-beta.2] - 2026-08-26
 
 ### SMTP 诊断与状态一致性

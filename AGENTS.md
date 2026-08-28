@@ -9,7 +9,7 @@ These instructions apply to the entire repository.
 - Run Android verification from `clients/android` with JDK 17 and Android SDK 35:
 
   ```bash
-  ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease connectedDebugAndroidTest
+  ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease verifyReleaseMailHandlers connectedDebugAndroidTest
   ```
 
 - Real-device claims require real-device evidence. Emulator checks do not prove carrier, APN, vendor background policy, SMS broadcast, or long-lock-screen behavior.

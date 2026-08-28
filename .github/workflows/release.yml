@@ -82,7 +82,7 @@ jobs:
           YANJIAN_KEYSTORE_PASSWORD: ${{ secrets.YANJIAN_RELEASE_KEYSTORE_PASSWORD }}
           YANJIAN_KEY_ALIAS: ${{ secrets.YANJIAN_RELEASE_KEY_ALIAS }}
           YANJIAN_KEY_PASSWORD: ${{ secrets.YANJIAN_RELEASE_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleRelease
+        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleRelease verifyReleaseMailHandlers
 
       - name: Package and verify signed APK
         shell: bash

@@ -6,5 +6,6 @@
 
 # JavaMail discovers SMTP providers through META-INF configuration files.
 -keep class com.sun.mail.smtp.** { *; }
+-keep class com.sun.mail.handlers.** { *; }
 -keep class javax.mail.** { *; }
 -keep class javax.activation.** { *; }

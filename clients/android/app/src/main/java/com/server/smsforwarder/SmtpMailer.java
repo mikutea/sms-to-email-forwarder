@@ -49,7 +49,33 @@ final class SmtpMailer {
         session.setDebug(false);
 
         MimeMessage message = createMessage(session, profile, item);
-        Transport.send(message);
+        Transport transport;
+        try {
+            transport = session.getTransport("smtp");
+        } catch (MessagingException error) {
+            throw SmtpStageException.connect(error);
+        }
+        try {
+            try {
+                transport.connect(profile.host, profile.port, profile.username, profile.password);
+            } catch (MessagingException error) {
+                throw SmtpStageException.connect(error);
+            }
+            try {
+                transport.sendMessage(message, message.getAllRecipients());
+            } catch (MessagingException error) {
+                throw SmtpStageException.send(error);
+            }
+        } finally {
+            if (transport.isConnected()) {
+                try {
+                    transport.close();
+                } catch (MessagingException ignored) {
+                    // The server already accepted or rejected sendMessage; closing must not
+                    // overwrite that definitive outcome with a less useful transport error.
+                }
+            }
+        }
     }
 
     static MimeMessage createMessage(Session session, SmtpProfile profile, QueueItem item)

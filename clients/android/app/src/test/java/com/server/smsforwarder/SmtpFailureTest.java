@@ -102,4 +102,29 @@ public final class SmtpFailureTest {
         MessagingException error = new MessagingException("Could not open smtp.example.test, port 465");
         assertFalse(SmtpFailure.describeForRecord(error).contains("SMTP-465"));
     }
+
+    @Test
+    public void connectStageAndSafeJavaMailSignalArePreservedWithoutRawResponse() {
+        String privateResponse = "Exception reading response for user@example.test private-token-123";
+        MessagingException error = SmtpStageException.connect(
+                new MessagingException(privateResponse));
+
+        String record = SmtpFailure.describeForRecord(error);
+
+        assertTrue(record.contains("CONNECT-AUTH"));
+        assertTrue(record.contains("RESPONSE-READ"));
+        assertFalse(record.contains("user@example.test"));
+        assertFalse(record.contains("private-token-123"));
+    }
+
+    @Test
+    public void sendStageAndCommandWriteSignalArePreserved() {
+        MessagingException error = SmtpStageException.send(
+                new MessagingException("Can't send command to SMTP host"));
+
+        String record = SmtpFailure.describeForRecord(error);
+
+        assertTrue(record.contains("SEND"));
+        assertTrue(record.contains("COMMAND-WRITE"));
+    }
 }

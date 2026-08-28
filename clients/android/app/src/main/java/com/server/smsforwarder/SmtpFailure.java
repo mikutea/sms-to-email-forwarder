@@ -9,8 +9,10 @@ import java.net.UnknownHostException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -62,7 +64,8 @@ final class SmtpFailure {
     }
 
     static String describeForRecord(Throwable error) {
-        return describe(error) + "（诊断码 " + diagnosticCode(error) + "）";
+        return describe(error) + "（诊断码 " + diagnosticCode(error)
+                + safeDiagnosticContext(error) + "）";
     }
 
     static boolean isAuthenticationFailure(Throwable error) {
@@ -92,9 +95,12 @@ final class SmtpFailure {
             return "CONNECT";
         }
         if (hasCause(error, EOFException.class)
-                || messagesContain(error, "eof on socket", "response: -1", "unexpected end of stream")) {
+                || messagesContain(error, "eof on socket", "response: -1", "unexpected end of stream",
+                "exception reading response", "bad greeting")) {
             return "CONNECTION-CLOSED";
         }
+        if (messagesContain(error, "can't send command to smtp host",
+                "could not send command to smtp host")) return "CONNECTION-RESET";
         if (hasCause(error, SocketException.class)) return "CONNECTION-RESET";
         if (hasCause(error, SendFailedException.class)) return "ADDRESS";
         if (replyCode >= 400 && replyCode <= 599) return "SMTP-" + replyCode;
@@ -124,6 +130,8 @@ final class SmtpFailure {
 
     private static int smtpReplyCode(Throwable error) {
         for (Throwable current : exceptionGraph(error)) {
+            int typedCode = typedSmtpReplyCode(current);
+            if (typedCode >= 400 && typedCode <= 599) return typedCode;
             String message = current.getMessage();
             if (message == null) continue;
             Matcher matcher = SMTP_REPLY_CODE.matcher(message);
@@ -136,6 +144,53 @@ final class SmtpFailure {
             }
         }
         return -1;
+    }
+
+    private static int typedSmtpReplyCode(Throwable error) {
+        String className = error.getClass().getName();
+        if (!className.startsWith("com.sun.mail.smtp.SMTP")) return -1;
+        try {
+            Object value = error.getClass().getMethod("getReturnCode").invoke(error);
+            return value instanceof Integer ? (Integer) value : -1;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return -1;
+        }
+    }
+
+    private static String safeDiagnosticContext(Throwable error) {
+        String stage = null;
+        Set<String> signals = new LinkedHashSet<>();
+        Set<String> types = new LinkedHashSet<>();
+        for (Throwable current : exceptionGraph(error)) {
+            if (current instanceof SmtpStageException && stage == null) {
+                stage = ((SmtpStageException) current).diagnosticStage();
+            }
+            if (!(current instanceof SmtpStageException) && types.size() < 4) {
+                String type = current.getClass().getSimpleName();
+                if (!type.isEmpty()) types.add(type);
+            }
+            String message = current.getMessage();
+            if (message == null) continue;
+            String lower = message.toLowerCase(Locale.ROOT);
+            addSignal(signals, lower, "exception reading response", "RESPONSE-READ");
+            addSignal(signals, lower, "bad greeting", "BAD-GREETING");
+            addSignal(signals, lower, "can't send command to smtp host", "COMMAND-WRITE");
+            addSignal(signals, lower, "could not send command to smtp host", "COMMAND-WRITE");
+            addSignal(signals, lower, "could not connect to smtp host", "CONNECT-HOST");
+            addSignal(signals, lower, "could not convert socket to tls", "TLS-UPGRADE");
+            addSignal(signals, lower, "no authentication mechanisms", "AUTH-MECHANISM");
+            addSignal(signals, lower, "failed to connect, no password specified", "AUTH-CREDENTIAL");
+        }
+        StringBuilder context = new StringBuilder();
+        if (stage != null) context.append(" · 阶段 ").append(stage);
+        if (!signals.isEmpty()) context.append(" · 线索 ").append(String.join("+", signals));
+        if (!types.isEmpty()) context.append(" · 异常 ").append(String.join(">", types));
+        return context.toString();
+    }
+
+    private static void addSignal(Set<String> signals, String message,
+                                  String needle, String signal) {
+        if (signals.size() < 4 && message.contains(needle)) signals.add(signal);
     }
 
     private static List<Throwable> exceptionGraph(Throwable error) {

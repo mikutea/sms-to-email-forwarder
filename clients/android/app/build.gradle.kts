@@ -21,8 +21,8 @@ android {
         applicationId = "com.server.smsforwarder"
         minSdk = 23
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.1.1-beta.4"
+        versionCode = 17
+        versionName = "1.1.1-beta.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -81,6 +81,29 @@ tasks.register("printVersionName") {
 tasks.register("printVersionCode") {
     doLast {
         print(android.defaultConfig.versionCode)
+    }
+}
+
+tasks.register("verifyReleaseMailHandlers") {
+    dependsOn("assembleRelease")
+    doLast {
+        val releaseDirectory = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        val releaseApks = releaseDirectory.listFiles { file ->
+            file.isFile && file.extension == "apk"
+        }?.toList().orEmpty()
+        check(releaseApks.size == 1) {
+            "Expected exactly one release APK in $releaseDirectory, found ${releaseApks.size}"
+        }
+        val requiredHandler = "com/sun/mail/handlers/multipart_mixed"
+        val handlerPresent = zipTree(releaseApks.single())
+            .matching { include("classes*.dex") }
+            .files
+            .any { dex ->
+                String(dex.readBytes(), Charsets.ISO_8859_1).contains(requiredHandler)
+            }
+        check(handlerPresent) {
+            "Release APK is missing $requiredHandler; multipart email will fail on Android"
+        }
     }
 }
 

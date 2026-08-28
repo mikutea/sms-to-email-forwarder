@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [1.1.1-beta.5] - 2026-08-28
+
+### Android / 鸿蒙多格式邮件发送修复
+
+- 修复 Release 构建被 R8 删除 JavaMail `multipart/alternative` 内容处理器，导致连接和认证成功后在提交邮件阶段触发 `UnsupportedDataTypeException` 的问题。
+- 在创建邮件前显式注册纯文本、HTML、XML、多段邮件和 RFC 822 内容处理器，并在压缩规则中保留对应实现。
+- 新增 Android 运行时测试：主动清空系统 Mailcap 映射后仍须成功序列化 HTML + 纯文本邮件；旧实现在同一测试上稳定失败。
+- 新增 Release APK 硬性检查；CI 和签名发布流水线会验证压缩后的 DEX 仍包含多段邮件处理器，避免 Debug 通过而正式包失效。
+
 ## [1.1.1-beta.4] - 2026-08-28
 
 ### 真机 SMTP 分阶段诊断

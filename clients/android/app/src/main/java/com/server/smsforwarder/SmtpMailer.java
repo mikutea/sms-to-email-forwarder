@@ -80,6 +80,7 @@ final class SmtpMailer {
 
     static MimeMessage createMessage(Session session, SmtpProfile profile, QueueItem item)
             throws MessagingException {
+        MailcapSupport.ensureInstalled();
         MimeMessage message = new StableIdMimeMessage(session, item.id);
         message.setFrom(new InternetAddress(profile.fromAddress));
         for (String recipient : profile.recipients()) {

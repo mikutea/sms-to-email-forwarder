@@ -32,20 +32,6 @@ final class ForwardProcessor {
         for (QueueItem item : ready) {
             try {
                 dispatch(database, config, item);
-                // SMTP has already accepted the message. Commit delivery and remove it from the
-                // retry queue before optional read-link bookkeeping, so a local Keystore,
-                // SQLite, or WorkManager failure cannot send the accepted email a second time.
-                database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
-                database.remove(item.id);
-                if (QueueItem.KIND_SMS.equals(item.kind)) {
-                    startReadLinkBestEffort(context, database, item);
-                    AppConfig.setSmsForwarded(context);
-                }
-                AppConfig.setSuccess(
-                        context,
-                        QueueItem.KIND_TEST.equals(item.kind)
-                                ? "SMTP 测试邮件已发送"
-                                : "短信已被 SMTP 服务器接受");
             } catch (MessagingException | RuntimeException error) {
                 int attempts = Math.min(item.attempts + 1, 1000);
                 boolean authenticationFailure = SmtpFailure.isAuthenticationFailure(error);
@@ -59,17 +45,42 @@ final class ForwardProcessor {
                 AppConfig.setSmtpFailure(
                         context,
                         classified + "，已保留在加密队列中重试");
-            } finally {
                 // Counts claimed rows that completed an SMTP attempt, whether that attempt
                 // succeeded or was moved to a later retry window.
                 processed++;
+                continue;
             }
+            // Nothing after this point belongs to the SMTP failure catch. Once dispatch returns,
+            // optional local bookkeeping can never turn an accepted email into a retry.
+            completeAcceptedDelivery(context, database, item);
+            processed++;
         }
         long finishedAt = System.currentTimeMillis();
         return new ProcessResult(
                 processed,
                 database.count() > 0,
                 database.hasReady(finishedAt));
+    }
+
+    private static void completeAcceptedDelivery(
+            Context context, QueueDatabase database, QueueItem item) {
+        // Preserve a useful history record when possible, but removal from the SMTP queue is the
+        // authoritative delivery transition. A history-only failure must not retain the email.
+        try {
+            database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
+        } catch (RuntimeException ignored) {
+            // Continue to the authoritative queue removal below.
+        }
+        database.remove(item.id);
+        if (QueueItem.KIND_SMS.equals(item.kind)) {
+            startReadLinkBestEffort(context, database, item);
+            AppConfig.setSmsForwarded(context);
+        }
+        AppConfig.setSuccess(
+                context,
+                QueueItem.KIND_TEST.equals(item.kind)
+                        ? "SMTP 测试邮件已发送"
+                        : "短信已被 SMTP 服务器接受");
     }
 
     private static void startReadLinkBestEffort(

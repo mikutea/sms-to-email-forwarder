@@ -35,10 +35,12 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @After
-    public void tearDown() {
+    public void tearDown() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        WorkManager.getInstance(context).cancelUniqueWork(
-                ForwardScheduler.RETRY_WAKEUP_WORK_NAME);
+        WorkManager.getInstance(context)
+                .cancelUniqueWork(ForwardScheduler.RETRY_WAKEUP_WORK_NAME)
+                .getResult()
+                .get(5L, TimeUnit.SECONDS);
         database.clear();
         database.clearHistory();
     }

@@ -55,6 +55,17 @@ public final class SmsNotificationListener extends NotificationListenerService {
         if (connectedInstance == this) {
             connectedInstance = null;
         }
+        if (shouldDisableAfterDisconnect(
+                SmsReadFeature.isEnabled(this), SmsReadFeature.hasNotificationAccess(this))) {
+            try {
+                // Revocation can happen entirely in system Settings without MainActivity ever
+                // resuming. Disable immediately so later SMS broadcasts cannot retain clues.
+                SmsReadFeature.setEnabled(this, false);
+            } catch (RuntimeException ignored) {
+                // setEnabled commits the preference before clearing local linkage data. Even if a
+                // transient database failure blocks cleanup, future SMS intake remains opted out.
+            }
+        }
         super.onListenerDisconnected();
     }
 
@@ -111,6 +122,10 @@ public final class SmsNotificationListener extends NotificationListenerService {
 
     static boolean retainDisabledBinding(int sdkInt) {
         return sdkInt < Build.VERSION_CODES.N;
+    }
+
+    static boolean shouldDisableAfterDisconnect(boolean featureEnabled, boolean accessGranted) {
+        return featureEnabled && !accessGranted;
     }
 
     private void processPendingAsync() {

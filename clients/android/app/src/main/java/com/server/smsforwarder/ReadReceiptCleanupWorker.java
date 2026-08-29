@@ -26,10 +26,22 @@ public final class ReadReceiptCleanupWorker extends Worker {
     @Override
     public Result doWork() {
         Context context = getApplicationContext();
-        QueueDatabase database = QueueDatabase.get(context);
-        database.expireReadReceipts(System.currentTimeMillis());
-        schedule(context, ExistingWorkPolicy.APPEND_OR_REPLACE);
-        return Result.success();
+        try {
+            QueueDatabase database = QueueDatabase.get(context);
+            database.expireReadReceipts(System.currentTimeMillis());
+            schedule(context, ExistingWorkPolicy.APPEND_OR_REPLACE);
+            return Result.success();
+        } catch (RuntimeException error) {
+            try {
+                // Prefer privacy over the optional read action. If the transient database error
+                // has cleared, remove every matching clue now instead of retaining it past TTL.
+                handleSchedulingFailure(context);
+                return Result.success();
+            } catch (RuntimeException cleanupError) {
+                // The database is still unavailable. Keep WorkManager's durable retry path alive.
+                return Result.retry();
+            }
+        }
     }
 
     static void schedule(Context context) {

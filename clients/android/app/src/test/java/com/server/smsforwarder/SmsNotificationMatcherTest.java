@@ -89,6 +89,22 @@ public final class SmsNotificationMatcherTest {
     }
 
     @Test
+    public void historicBodyTextCannotAuthorizeAnOrdinaryWindowAction() {
+        long receivedAt = 1_000_000L;
+        String clue = "第一条旅行验证码123456";
+
+        int score = SmsNotificationMatcher.score(
+                receivedAt,
+                "10690001",
+                clue,
+                receivedAt + 30_000L,
+                "10690001 第二条旅行验证码654321 第一条旅行验证码123456",
+                "10690001 第二条旅行验证码654321");
+
+        assertEquals(-1, score);
+    }
+
+    @Test
     public void newerMessageFromTheSameSenderCannotReplaceTheCluedSms() {
         long receivedAt = 1_000_000L;
 

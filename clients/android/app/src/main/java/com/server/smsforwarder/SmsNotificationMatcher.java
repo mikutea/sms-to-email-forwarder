@@ -49,8 +49,10 @@ final class SmsNotificationMatcher {
         if (delta < -EARLY_TOLERANCE_MS) {
             return -1;
         }
-        String haystack = normalize(
-                delta > LATE_TOLERANCE_MS ? currentEventText : notificationText);
+        // Only current-event fields may authorize a mark-read action. Expanded, line-list,
+        // subtext, and historic payloads can retain an older SMS after the default app refreshes
+        // the notification for a newer message in the same conversation.
+        String haystack = normalize(currentEventText);
         String normalizedBodyClue = normalize(bodyMatchClue);
         boolean hasBodyClue = normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS;
         boolean bodyMatches = hasBodyClue && haystack.contains(normalizedBodyClue);

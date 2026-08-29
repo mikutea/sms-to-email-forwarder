@@ -486,6 +486,19 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void privacyCleanupWorkInputOverridesStaleEnabledPreferences() {
+        androidx.work.Data input = ReadReceiptCleanupWorker.immediateInputData(true);
+
+        assertTrue(ReadReceiptCleanupWorker.shouldRunDisabledCleanup(
+                input.getBoolean(
+                        ReadReceiptCleanupWorker.INPUT_FORCE_PRIVACY_CLEANUP,
+                        false),
+                true,
+                true,
+                false));
+    }
+
+    @Test
     public void failedReadReceiptCleanupSchedulingClearsTemporaryMatchingData() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         long now = System.currentTimeMillis();

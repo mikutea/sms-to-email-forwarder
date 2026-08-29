@@ -3,6 +3,7 @@ package com.server.smsforwarder;
 import android.content.Context;
 
 import androidx.annotation.NonNull;
+import androidx.work.Data;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.Operation;
@@ -15,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class ReadReceiptCleanupWorker extends Worker {
     static final String WORK_NAME = "sms_read_receipt_cleanup";
+    static final String INPUT_FORCE_PRIVACY_CLEANUP = "force_privacy_cleanup";
 
     public ReadReceiptCleanupWorker(
             @NonNull Context appContext,
@@ -26,7 +28,8 @@ public final class ReadReceiptCleanupWorker extends Worker {
     @Override
     public Result doWork() {
         Context context = getApplicationContext();
-        boolean disabledCleanup = needsDisabledCleanup(
+        boolean disabledCleanup = shouldRunDisabledCleanup(
+                getInputData().getBoolean(INPUT_FORCE_PRIVACY_CLEANUP, false),
                 SmsReadFeature.isEnabled(context),
                 SmsReadFeature.hasNotificationAccess(context),
                 SmsReadFeature.isCleanupPending(context));
@@ -85,7 +88,9 @@ public final class ReadReceiptCleanupWorker extends Worker {
 
     private static void scheduleImmediate(Context context, boolean disabledCleanup) {
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(
-                ReadReceiptCleanupWorker.class).build();
+                ReadReceiptCleanupWorker.class)
+                .setInputData(immediateInputData(disabledCleanup))
+                .build();
         Context applicationContext = context.getApplicationContext();
         try {
             Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
@@ -110,6 +115,21 @@ public final class ReadReceiptCleanupWorker extends Worker {
     static boolean needsDisabledCleanup(
             boolean featureEnabled, boolean accessGranted, boolean cleanupPending) {
         return cleanupPending || !featureEnabled || !accessGranted;
+    }
+
+    static boolean shouldRunDisabledCleanup(
+            boolean forcedByWorkRequest,
+            boolean featureEnabled,
+            boolean accessGranted,
+            boolean cleanupPending) {
+        return forcedByWorkRequest
+                || needsDisabledCleanup(featureEnabled, accessGranted, cleanupPending);
+    }
+
+    static Data immediateInputData(boolean disabledCleanup) {
+        return new Data.Builder()
+                .putBoolean(INPUT_FORCE_PRIVACY_CLEANUP, disabledCleanup)
+                .build();
     }
 
     private static void schedule(Context context, ExistingWorkPolicy policy) {

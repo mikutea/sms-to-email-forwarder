@@ -90,8 +90,9 @@ final class SmsReadFeature {
         try {
             setEnabled(context, false);
         } catch (RuntimeException error) {
-            // The preference commit happens before database cleanup. Preserve a durable retry for
-            // receipts and queued clues if the local database is transiently unavailable.
+            // Preserve the opt-out intent in WorkManager input as well as preferences. If both
+            // synchronous preference commits fail, a process restart must not turn the durable
+            // retry into ordinary expiry work based on the stale enabled preference.
             ReadReceiptCleanupWorker.schedulePrivacyCleanup(context);
         }
     }

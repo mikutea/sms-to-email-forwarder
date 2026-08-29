@@ -98,7 +98,18 @@ final class SmsReadFeature {
     }
 
     static void reconcileDisabledLinkageData(Context context) {
+        reconcileDisabledLinkageData(context, false);
+    }
+
+    static void reconcileDisabledLinkageData(Context context, boolean forcedPrivacyCleanup) {
         synchronized (OPERATION_LOCK) {
+            if (forcedPrivacyCleanup) {
+                // The durable WorkManager input is authoritative after a process restart. Stored
+                // preferences may still say enabled when both earlier commits failed, so do not
+                // let those stale values bypass the requested opt-out cleanup.
+                setEnabled(context, false);
+                return;
+            }
             if (isEnabled(context)
                     && hasNotificationAccess(context)
                     && !isCleanupPending(context)) {

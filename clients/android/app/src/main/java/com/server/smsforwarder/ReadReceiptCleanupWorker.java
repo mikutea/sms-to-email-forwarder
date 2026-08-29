@@ -28,14 +28,17 @@ public final class ReadReceiptCleanupWorker extends Worker {
     @Override
     public Result doWork() {
         Context context = getApplicationContext();
+        boolean forcedPrivacyCleanup = getInputData().getBoolean(
+                INPUT_FORCE_PRIVACY_CLEANUP,
+                false);
         boolean disabledCleanup = shouldRunDisabledCleanup(
-                getInputData().getBoolean(INPUT_FORCE_PRIVACY_CLEANUP, false),
+                forcedPrivacyCleanup,
                 SmsReadFeature.isEnabled(context),
                 SmsReadFeature.hasNotificationAccess(context),
                 SmsReadFeature.isCleanupPending(context));
         try {
             if (disabledCleanup) {
-                SmsReadFeature.reconcileDisabledLinkageData(context);
+                SmsReadFeature.reconcileDisabledLinkageData(context, forcedPrivacyCleanup);
                 return Result.success();
             }
             QueueDatabase database = QueueDatabase.get(context);

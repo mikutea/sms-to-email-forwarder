@@ -487,15 +487,21 @@ public final class QueueRecoveryAndroidTest {
 
     @Test
     public void privacyCleanupWorkInputOverridesStaleEnabledPreferences() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SmsReadFeature.setEnabled(context, true);
         androidx.work.Data input = ReadReceiptCleanupWorker.immediateInputData(true);
+        boolean forcedPrivacyCleanup = input.getBoolean(
+                ReadReceiptCleanupWorker.INPUT_FORCE_PRIVACY_CLEANUP,
+                false);
 
         assertTrue(ReadReceiptCleanupWorker.shouldRunDisabledCleanup(
-                input.getBoolean(
-                        ReadReceiptCleanupWorker.INPUT_FORCE_PRIVACY_CLEANUP,
-                        false),
+                forcedPrivacyCleanup,
                 true,
                 true,
                 false));
+        SmsReadFeature.reconcileDisabledLinkageData(context, forcedPrivacyCleanup);
+        assertFalse(SmsReadFeature.isEnabled(context));
+        assertFalse(SmsReadFeature.isCleanupPending(context));
     }
 
     @Test

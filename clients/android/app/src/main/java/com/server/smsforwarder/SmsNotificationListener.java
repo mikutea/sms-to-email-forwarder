@@ -32,7 +32,7 @@ public final class SmsNotificationListener extends NotificationListenerService {
     public void onListenerConnected() {
         super.onListenerConnected();
         if (!SmsReadFeature.isEnabled(this)) {
-            if (retainDisabledBinding(Build.VERSION.SDK_INT)) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                 // Android 6 has no requestRebind/requestUnbind API. The system may deliver the
                 // first binding before MainActivity observes the grant and enables the feature,
                 // so retain the instance while every disabled callback remains guarded.

@@ -33,6 +33,7 @@ public final class QueueRecoveryAndroidTest {
         database.clear();
         database.clearHistory();
         SmsReadFeature.setEnabled(context, false);
+        ForwardScheduler.clearUrgentWorkReservation(context);
     }
 
     @After
@@ -42,6 +43,11 @@ public final class QueueRecoveryAndroidTest {
                 .cancelUniqueWork(ForwardScheduler.RETRY_WAKEUP_WORK_NAME)
                 .getResult()
                 .get(5L, TimeUnit.SECONDS);
+        WorkManager.getInstance(context)
+                .cancelUniqueWork(ForwardScheduler.URGENT_WORK_NAME)
+                .getResult()
+                .get(5L, TimeUnit.SECONDS);
+        ForwardScheduler.clearUrgentWorkReservation(context);
         database.clear();
         database.clearHistory();
     }
@@ -243,6 +249,25 @@ public final class QueueRecoveryAndroidTest {
                 .get(5L, TimeUnit.SECONDS);
         assertFalse(work.isEmpty());
         assertFalse(work.get(0).getState().isFinished());
+    }
+
+    @Test
+    public void urgentRequestGateCoalescesABurstIntoOnePendingSuccessor() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        ForwardScheduler.clearUrgentWorkReservation(context);
+
+        String firstReservation = ForwardScheduler.reserveUrgentWork(context);
+        assertFalse(firstReservation.isEmpty());
+        for (int i = 0; i < 500; i++) {
+            assertEquals("", ForwardScheduler.reserveUrgentWork(context));
+        }
+        ForwardScheduler.acknowledgeUrgentWork(context, "another-process-token");
+        assertEquals("", ForwardScheduler.reserveUrgentWork(context));
+        ForwardScheduler.acknowledgeUrgentWork(context, firstReservation);
+        String secondReservation = ForwardScheduler.reserveUrgentWork(context);
+        assertFalse(secondReservation.isEmpty());
+        assertFalse(firstReservation.equals(secondReservation));
+        ForwardScheduler.clearUrgentWorkReservation(context);
     }
 
     @Test

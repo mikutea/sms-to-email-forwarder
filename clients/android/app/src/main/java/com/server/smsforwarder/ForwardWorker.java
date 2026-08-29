@@ -16,6 +16,14 @@ public final class ForwardWorker extends Worker {
     public Result doWork() {
         try {
             boolean urgent = ForwardScheduler.isUrgent(getInputData());
+            if (urgent) {
+                // The worker now owns the one reserved urgent slot. A burst that arrives while it
+                // runs can reserve exactly one successor; the worker's own drain request will
+                // coalesce with that same slot.
+                ForwardScheduler.acknowledgeUrgentWork(
+                        getApplicationContext(),
+                        ForwardScheduler.urgentReservationToken(getInputData()));
+            }
             ForwardProcessor.ProcessResult result = ForwardProcessor.processReady(
                     getApplicationContext(),
                     1);

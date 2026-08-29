@@ -18,11 +18,12 @@ public final class SmsReceiver extends BroadcastReceiver {
         if (!Telephony.Sms.Intents.SMS_RECEIVED_ACTION.equals(intent.getAction())) {
             return;
         }
+        final long localReceivedAt = System.currentTimeMillis();
         final PendingResult pendingResult = goAsync();
         final Context appContext = context.getApplicationContext();
         EXECUTOR.execute(() -> {
             try {
-                handle(appContext, intent);
+                handle(appContext, intent, localReceivedAt);
             } catch (RuntimeException e) {
                 AppConfig.setStatus(appContext, "接收短信时发生本地错误：" + safeMessage(e));
             } finally {
@@ -31,12 +32,11 @@ public final class SmsReceiver extends BroadcastReceiver {
         });
     }
 
-    private static void handle(Context context, Intent intent) {
+    private static void handle(Context context, Intent intent, long localReceivedAt) {
         AppConfig config = AppConfig.load(context);
         if (!config.enabled || !config.privacyConsent) {
             return;
         }
-        long localReceivedAt = System.currentTimeMillis();
 
         SmsMessage[] parts = Telephony.Sms.Intents.getMessagesFromIntent(intent);
         if (parts == null || parts.length == 0) {

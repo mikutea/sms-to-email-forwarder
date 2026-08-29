@@ -125,6 +125,7 @@ public final class MainActivity extends Activity {
     private boolean firstResume = true;
     private boolean awaitingInstallPermission;
     private boolean awaitingVendorSettingsReturn;
+    private boolean awaitingNotificationAccess;
     private File pendingUpdateApk;
     private int historyFilter;
 
@@ -197,6 +198,9 @@ public final class MainActivity extends Activity {
         } else {
             checkForUpdates(false, false);
         }
+        ForwardScheduler.reconcile(this);
+        ReadReceiptCleanupWorker.reconcile(this);
+        SmsNotificationListener.requestProcessing(this);
     }
 
     @Override
@@ -230,6 +234,9 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (SmsReadFeature.isEnabled(this) && !SmsReadFeature.hasNotificationAccess(this)) {
+            SmsReadFeature.disableAndScheduleCleanup(this);
+        }
         if (firstResume) {
             firstResume = false;
         } else if (page != null) {
@@ -245,6 +252,25 @@ public final class MainActivity extends Activity {
             if (!TravelGuard.isBackgroundConfirmed(this)) {
                 showVendorSettingsReturnDialog();
             }
+        }
+        if (awaitingNotificationAccess) {
+            awaitingNotificationAccess = false;
+            if (SmsReadFeature.hasNotificationAccess(this)) {
+                if (SmsReadFeature.enableAfterAccess(this)) {
+                    SmsNotificationListener.requestProcessing(this);
+                    showToast("已开启：转发成功后尝试标记系统短信已读");
+                } else {
+                    showToast("正在完成上次关闭清理，请稍后重试");
+                }
+            } else {
+                SmsReadFeature.disableAndScheduleCleanup(this);
+                showGlassDialog(
+                        "通知使用权尚未开启",
+                        "雁笺没有获得通知使用权，因此不会读取通知，也不会尝试标记短信已读。你可以稍后重新开启。",
+                        "知道了", null, null);
+            }
+            rootPageCache.clear();
+            showPage(PAGE_PRIVACY);
         }
     }
 
@@ -653,21 +679,27 @@ public final class MainActivity extends Activity {
         });
         toolRow.addView(heartbeatAction, weightedWrap());
         View retry = toolCell(MaterialCommunityIcons.mdi_refresh, "重试队列", () -> {
-            ForwardScheduler.schedule(this);
-            showToast("已请求立即重试");
+            int released = ForwardScheduler.retryAllNow(this);
+            showToast(released == 0
+                    ? "当前没有可立即释放的等待项"
+                    : "已将 " + released + " 条消息设为立即重试");
+            showPage(PAGE_GUARDIAN);
         });
         toolRow.addView(retry, weightedWrap());
         tools.addView(toolRow, matchWrap());
         page.addView(tools, cardParams());
 
-        TextView queue = navigationRow("队列状态", "待发 " + health.pendingCount + " 条", MaterialCommunityIcons.mdi_inbox);
+        TextView queue = navigationRow(
+                "队列状态",
+                "共 " + health.pendingCount + " 条 · " + health.pendingStats.compactLabel(),
+                MaterialCommunityIcons.mdi_inbox);
         queue.setOnClickListener(view -> showPage(PAGE_HISTORY));
         queue.setBackground(glassSurface(24));
         applyGlassDepth(queue, 7f, false);
         page.addView(queue, cardParams());
 
         TextView networkTip = text(
-                health.networkLabel + " · 网络恢复后待发短信会自动补发",
+                health.networkLabel + " · 网络恢复后待发消息会自动补发",
                 13f,
                 health.connected ? COLOR_MUTED : COLOR_CINNABAR,
                 false);
@@ -1106,10 +1138,13 @@ public final class MainActivity extends Activity {
             }
             page.addView(timeline, cardParams());
         }
-        TextView retry = singleActionRow("立即重试全部待发短信", MaterialIcons.md_refresh);
+        TextView retry = singleActionRow("立即重试全部待发消息", MaterialIcons.md_refresh);
         retry.setOnClickListener(view -> {
-            ForwardScheduler.schedule(this);
-            showToast("已安排重试");
+            int released = ForwardScheduler.retryAllNow(this);
+            showToast(released == 0
+                    ? "当前没有可释放的等待项，正在发送的消息不会重复处理"
+                    : "已将 " + released + " 条消息设为立即重试");
+            showPage(PAGE_HISTORY);
         });
         LinearLayout.LayoutParams retryParams = matchWrap();
         retryParams.setMargins(0, dp(3), 0, dp(8));
@@ -1121,7 +1156,7 @@ public final class MainActivity extends Activity {
         clear.setCompoundDrawablePadding(dp(7));
         clear.setOnClickListener(view -> showGlassDialog(
                 "清空历史记录？",
-                "不会删除仍在待发队列中的短信。历史记录删除后无法恢复。",
+                "不会删除仍在待发队列中的消息；将同时清除已发送短信尚未完成的临时已读联动数据。历史删除后无法恢复。",
                 "确认清空", () -> {
                     QueueDatabase.get(this).clearHistory();
                     showPage(PAGE_HISTORY);
@@ -1410,12 +1445,68 @@ public final class MainActivity extends Activity {
         protections.addView(statusRow(MaterialIcons.md_vpn_key,
                 "SMTP 授权码", "Android Keystore 加密", true));
         protections.addView(statusRow(MaterialCommunityIcons.mdi_message_text_outline,
-                "待发短信与历史", "AES-GCM 加密保存", true));
+                "待发消息与历史", "AES-GCM 加密保存", true));
         protections.addView(statusRow(MaterialIcons.md_visibility_off,
                 "系统截图", BuildConfig.DEBUG ? "测试包允许视觉验收" : "正式包已禁止", !BuildConfig.DEBUG));
         protections.addView(statusRow(MaterialIcons.md_share,
                 "诊断报告", "默认移除授权码与正文", true));
         page.addView(protections, cardParams());
+
+        boolean notificationAccess = SmsReadFeature.hasNotificationAccess(this);
+        boolean markReadEnabled = SmsReadFeature.isEnabled(this) && notificationAccess;
+        LinearLayout readCard = card();
+        readCard.addView(sectionHeader(
+                MaterialCommunityIcons.mdi_message_text_outline,
+                "成功后的系统短信状态"));
+        Switch markRead = new Switch(this);
+        markRead.setMinHeight(dp(MIN_TOUCH_DP));
+        markRead.setMinWidth(dp(MIN_TOUCH_DP));
+        markRead.setText("转发成功后标记系统短信已读");
+        markRead.setTextColor(COLOR_INK);
+        markRead.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f * TEXT_SCALE);
+        markRead.setPadding(dp(6), dp(7), dp(2), dp(7));
+        markRead.setChecked(markReadEnabled);
+        final boolean[] changingMarkRead = {false};
+        markRead.setOnCheckedChangeListener((button, checked) -> {
+            if (changingMarkRead[0]) {
+                return;
+            }
+            if (checked) {
+                if (SmsReadFeature.hasNotificationAccess(this)) {
+                    if (SmsReadFeature.enableAfterAccess(this)) {
+                        SmsNotificationListener.requestProcessing(this);
+                        showToast("已开启自动已读联动");
+                    } else {
+                        changingMarkRead[0] = true;
+                        button.setChecked(false);
+                        changingMarkRead[0] = false;
+                        showToast("正在完成上次关闭清理，请稍后重试");
+                    }
+                } else {
+                    changingMarkRead[0] = true;
+                    button.setChecked(false);
+                    changingMarkRead[0] = false;
+                    requestNotificationAccess();
+                }
+            } else {
+                SmsReadFeature.disableAndScheduleCleanup(this);
+                showToast("自动已读联动已关闭");
+            }
+        });
+        readCard.addView(markRead, matchWrap());
+        readCard.addView(settingsInlineRow(
+                "通知使用权",
+                notificationAccess ? "系统已授权" : "尚未授权",
+                MaterialIcons.md_notifications,
+                false));
+        Button manageNotificationAccess = secondaryButton(
+                notificationAccess ? "管理或撤销系统授权" : "打开通知使用权设置");
+        manageNotificationAccess.setOnClickListener(view -> openNotificationAccessSettings(false));
+        readCard.addView(manageNotificationAccess, matchWrap());
+        page.addView(readCard, cardParams());
+        addNotice(
+                "该功能默认关闭。开启后，雁笺只匹配默认短信应用在成功转发前后产生的通知，并只调用语义明确的“标记已读”动作。为兼容正文脱敏规则，原短信只保留最多 16 个规范化字符的 Keystore 加密匹配线索；不会把其他通知正文写入队列、日志或诊断报告。",
+                page);
 
         page.addView(informationCard(
                 MaterialCommunityIcons.mdi_email_outline,
@@ -1681,7 +1772,7 @@ public final class MainActivity extends Activity {
                 visualTestMode || health.readyForTravel() ? COLOR_JADE_DARK : COLOR_AMBER, true));
         status.addView(stateCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         status.addView(statDivider());
-        status.addView(statColumn("队列", Integer.toString(health.pendingCount)));
+        status.addView(statColumn("短信", Integer.toString(health.pendingStats.sms)));
         status.addView(statDivider());
         String recentSuccess = visualTestMode ? "11:40"
                 : health.lastSuccessAt == 0L ? "尚无"
@@ -1707,7 +1798,9 @@ public final class MainActivity extends Activity {
         privacy.addView(settingsRow("分享脱敏诊断报告", "不包含授权码与短信正文",
                 MaterialIcons.md_share, this::shareDiagnostics));
         privacy.addView(hairlineDivider());
-        privacy.addView(settingsRow("清空本机待发送队列", "当前 " + health.pendingCount + " 条",
+        privacy.addView(settingsRow(
+                "清空本机待发送队列",
+                "共 " + health.pendingCount + " 条 · " + health.pendingStats.compactLabel(),
                 MaterialIcons.md_delete, this::confirmClearQueue));
         page.addView(privacy, cardParams());
 
@@ -1909,6 +2002,10 @@ public final class MainActivity extends Activity {
             }
             if (success) {
                 AppConfig.setSuccess(this, result);
+                int released = ForwardScheduler.retryAllNow(this);
+                if (released > 0) {
+                    result += "，已安排补发 " + released + " 条历史待发消息";
+                }
             } else {
                 AppConfig.setSmtpFailure(this, result);
             }
@@ -1990,16 +2087,24 @@ public final class MainActivity extends Activity {
     private void confirmClearQueue() {
         int count = QueueDatabase.get(this).count();
         if (count == 0) {
-            showToast("当前没有待发送短信");
+            showToast("当前没有待发送消息");
             return;
         }
         showGlassDialog(
                 "清空待发送队列？",
-                "将删除 " + count + " 条尚未成功发送的加密消息，删除后无法恢复。",
+                "将删除 " + count + " 条尚未成功发送的加密短信、心跳或提醒，删除后无法恢复。",
                 "确认删除", () -> {
-                    QueueDatabase.get(this).clear();
-                    AppConfig.setStatus(this, "待发送队列已由用户清空");
-                    showPage(currentPage);
+                    try {
+                        QueueDatabase.get(this).clear();
+                        AppConfig.setStatus(this, "待发送队列已由用户清空");
+                        showPage(currentPage);
+                    } catch (RuntimeException error) {
+                        AppConfig.setStatus(this, "安全状态更新失败，本次未清空待发送队列");
+                        showGlassDialog(
+                                "暂时无法安全清空",
+                                "已读联动状态未能安全更新，本次没有删除待发送数据。请稍后重试。",
+                                "知道了", null, null);
+                    }
                 }, "取消");
     }
 
@@ -2012,6 +2117,38 @@ public final class MainActivity extends Activity {
         showGlassDialog(
                 "无法打开系统设置",
                 "当前系统没有向第三方 App 提供可用的设置入口。请手动打开“设置”，搜索“雁笺”进入应用详情。",
+                "知道了", null, null);
+    }
+
+    private void requestNotificationAccess() {
+        showGlassDialog(
+                "允许自动标记系统短信已读？",
+                "系统授予的是设备级“通知使用权”，范围可能包含其他应用通知。雁笺只会在真实短信被 SMTP 接受后，检查默认短信应用的通知并调用其“标记已读”动作；为兼容正文脱敏规则，原短信只保留最多 16 个规范化字符的 Keystore 加密匹配线索，不会保存其他通知正文。该能力默认关闭，也可以随时在系统设置中撤销。",
+                "前往系统授权", () -> openNotificationAccessSettings(true), "暂不开启");
+    }
+
+    private void openNotificationAccessSettings(boolean enabling) {
+        Intent detail;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            detail = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS);
+            detail.putExtra(
+                    Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    SmsReadFeature.listenerComponent(this).flattenToString());
+        } else {
+            detail = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+        }
+        awaitingNotificationAccess = enabling;
+        if (openIntentSafely(detail, null)) {
+            return;
+        }
+        Intent list = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+        if (openIntentSafely(list, null)) {
+            return;
+        }
+        awaitingNotificationAccess = false;
+        showGlassDialog(
+                "无法打开通知使用权设置",
+                "当前系统没有提供可调用的通知使用权页面。自动标记已读保持关闭，不影响短信转发。",
                 "知道了", null, null);
     }
 
@@ -2034,7 +2171,7 @@ public final class MainActivity extends Activity {
         if (!health.connected) {
             showGlassDialog(
                     "当前网络不可用",
-                    health.networkLabel + "。请检查移动数据、WLAN、VPN 或私人 DNS；网络恢复后待发短信会自动补发。",
+                    health.networkLabel + "。请检查移动数据、WLAN、VPN 或私人 DNS；网络恢复后待发消息会自动补发。",
                     "打开流量设置", this::openBackgroundDataSettings, "稍后处理");
             return;
         }
@@ -3707,7 +3844,12 @@ public final class MainActivity extends Activity {
                 13f, color, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (!"FILTERED".equals(item.status)) {
             boolean visualRow = visualTestMode && item.id.startsWith("visual-");
-            if (!visualRow || "visual-2".equals(item.id) || "visual-4".equals(item.id)) {
+            boolean actionableRealRow = !visualRow
+                    && (ForwardScheduler.isRetryOnlyHistoryStatus(item.status)
+                    || ForwardScheduler.isExplicitHistoryResendStatus(item.status));
+            boolean actionableVisualRow = visualRow
+                    && ("visual-2".equals(item.id) || "visual-4".equals(item.id));
+            if (actionableRealRow || actionableVisualRow) {
                 heading.addView(historyRetryButton(item),
                         new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(32)));
             }
@@ -3740,13 +3882,22 @@ public final class MainActivity extends Activity {
     }
 
     private Button historyRetryButton(HistoryItem item) {
-        Button resend = secondaryButton("RETRY_WAIT".equals(item.status) ? "立即重试" : "重新转发");
+        Button resend = secondaryButton(
+                ForwardScheduler.isRetryOnlyHistoryStatus(item.status)
+                        ? "立即重试" : "重新转发");
         resend.setTextSize(11f);
         resend.setMinHeight(dp(MIN_TOUCH_DP));
         resend.setPadding(dp(9), dp(2), dp(9), dp(2));
         resend.setOnClickListener(view -> {
             if (item.id.startsWith("visual-")) {
                 showToast("视觉测试记录不会写入发送队列");
+            } else if (ForwardScheduler.isRetryOnlyHistoryStatus(item.status)) {
+                if (ForwardScheduler.retryNow(this, item.id)) {
+                    showToast("此条已设为立即重试");
+                } else {
+                    showToast("发送状态已变化，本次没有重复转发");
+                }
+                showPage(PAGE_HISTORY);
             } else if (QueueDatabase.get(this).requeue(item)) {
                 ForwardScheduler.schedule(this);
                 showToast("已重新加入加密发送队列");

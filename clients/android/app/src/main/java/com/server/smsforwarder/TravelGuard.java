@@ -75,8 +75,10 @@ final class TravelGuard {
 
     static void enqueueHeartbeatNow(Context context, String title, boolean alert) {
         String kind = alert ? QueueItem.KIND_ALERT : QueueItem.KIND_HEARTBEAT;
-        QueueDatabase.get(context).enqueueStatus(kind, title, DeviceHealth.inspect(context).summary());
-        ForwardScheduler.schedule(context);
+        if (QueueDatabase.get(context).enqueueStatus(
+                kind, title, DeviceHealth.inspect(context).summary())) {
+            ForwardScheduler.schedule(context);
+        }
     }
 
     private static SharedPreferences prefs(Context context) {

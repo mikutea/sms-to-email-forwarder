@@ -18,11 +18,12 @@ public final class SmsReceiver extends BroadcastReceiver {
         if (!Telephony.Sms.Intents.SMS_RECEIVED_ACTION.equals(intent.getAction())) {
             return;
         }
+        final long localReceivedAt = System.currentTimeMillis();
         final PendingResult pendingResult = goAsync();
         final Context appContext = context.getApplicationContext();
         EXECUTOR.execute(() -> {
             try {
-                handle(appContext, intent);
+                handle(appContext, intent, localReceivedAt);
             } catch (RuntimeException e) {
                 AppConfig.setStatus(appContext, "接收短信时发生本地错误：" + safeMessage(e));
             } finally {
@@ -31,7 +32,7 @@ public final class SmsReceiver extends BroadcastReceiver {
         });
     }
 
-    private static void handle(Context context, Intent intent) {
+    private static void handle(Context context, Intent intent, long localReceivedAt) {
         AppConfig config = AppConfig.load(context);
         if (!config.enabled || !config.privacyConsent) {
             return;
@@ -91,10 +92,15 @@ public final class SmsReceiver extends BroadcastReceiver {
             return;
         }
 
-        QueueDatabase.EnqueueResult result = QueueDatabase.get(context).enqueueSms(
+        QueueDatabase database = QueueDatabase.get(context);
+        QueueDatabase.EnqueueResult result = SmsReadFeature.enqueueIncomingSms(
+                context,
+                database,
                 sender,
                 MessageFilter.transformBody(body.toString(), rules),
+                body.toString(),
                 receivedAt,
+                localReceivedAt,
                 simSlot);
         if (result == QueueDatabase.EnqueueResult.INSERTED) {
             AppConfig.setStatus(context, "新短信已进入本机加密发送队列");
@@ -102,7 +108,7 @@ public final class SmsReceiver extends BroadcastReceiver {
             AppConfig.setStatus(context, "重复短信广播已忽略");
         } else {
             String id = QueueDatabase.stableSmsId(sender, body.toString(), receivedAt, simSlot);
-            QueueDatabase.get(context).recordFiltered(
+            database.recordFiltered(
                     id,
                     receivedAt,
                     sender,
@@ -111,8 +117,14 @@ public final class SmsReceiver extends BroadcastReceiver {
                     "待发送队列已满，本条未入队；请恢复网络或清理队列");
             AppConfig.setStatus(context, "待发送队列已达到安全上限，本条短信未入队");
         }
-        if (QueueDatabase.get(context).count() > 0) {
-            ForwardScheduler.scheduleFromQueue(context);
+        if (result == QueueDatabase.EnqueueResult.INSERTED) {
+            // A new SMS must not wait behind an older delayed backoff request.
+            // Urgent work is serialized separately from the normal delayed-retry chain.
+            ForwardScheduler.schedule(context);
+        } else if (ForwardScheduler.shouldReconcileAfterDuplicate(result)) {
+            // The original broadcast may have died after committing the row but before scheduling
+            // it. A duplicate is therefore also a durable recovery signal for the existing queue.
+            ForwardScheduler.reconcile(context);
         }
     }
 

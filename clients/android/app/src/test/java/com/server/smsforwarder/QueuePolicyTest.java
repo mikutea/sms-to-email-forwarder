@@ -36,6 +36,12 @@ public final class QueuePolicyTest {
     }
 
     @Test
+    public void historyCapacityCoversTheEntirePendingQueue() {
+        assertTrue(QueueDatabase.historyRowCapacity()
+                >= QueueDatabase.pendingRowCapacity());
+    }
+
+    @Test
     public void pendingStatsSeparatesSmsFromStatusTraffic() {
         PendingStats stats = new PendingStats(7, 2, 1, 3);
 

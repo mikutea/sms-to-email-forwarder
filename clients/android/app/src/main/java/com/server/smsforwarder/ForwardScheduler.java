@@ -17,6 +17,7 @@ final class ForwardScheduler {
     private static final long MIN_BACKOFF_MS = 30_000L;
     private static final String WORK_NAME = "sms_forwarding_queue";
     private static final String URGENT_WORK_NAME = "sms_forwarding_queue_urgent";
+    static final String RETRY_WAKEUP_WORK_NAME = "sms_forwarding_queue_urgent_retry_wakeup";
     private static final String KEY_URGENT = "urgent_queue_lane";
 
     private ForwardScheduler() {
@@ -62,6 +63,29 @@ final class ForwardScheduler {
         if (QueueDatabase.get(context).hasReady(System.currentTimeMillis())) {
             scheduleUrgent(context);
         }
+    }
+
+    static void scheduleUrgentRetryFromQueue(Context context) {
+        long runnableAt = QueueDatabase.get(context).earliestRunnableAt();
+        if (runnableAt == 0L) {
+            return;
+        }
+        long delay = Math.max(0L, runnableAt - System.currentTimeMillis());
+        Constraints constraints = new Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build();
+        OneTimeWorkRequest.Builder builder = new OneTimeWorkRequest.Builder(
+                ForwardRetryWakeupWorker.class)
+                .setConstraints(constraints)
+                .setBackoffCriteria(
+                        BackoffPolicy.EXPONENTIAL, MIN_BACKOFF_MS, TimeUnit.MILLISECONDS);
+        if (delay > 0L) {
+            builder.setInitialDelay(delay, TimeUnit.MILLISECONDS);
+        }
+        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(
+                RETRY_WAKEUP_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                builder.build());
     }
 
     private static void scheduleNormalFromQueue(

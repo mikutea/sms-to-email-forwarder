@@ -36,6 +36,7 @@ public final class SmsReceiver extends BroadcastReceiver {
         if (!config.enabled || !config.privacyConsent) {
             return;
         }
+        long localReceivedAt = System.currentTimeMillis();
 
         SmsMessage[] parts = Telephony.Sms.Intents.getMessagesFromIntent(intent);
         if (parts == null || parts.length == 0) {
@@ -98,6 +99,7 @@ public final class SmsReceiver extends BroadcastReceiver {
                 MessageFilter.transformBody(body.toString(), rules),
                 bodyMatchClue,
                 receivedAt,
+                localReceivedAt,
                 simSlot);
         if (result == QueueDatabase.EnqueueResult.INSERTED) {
             AppConfig.setStatus(context, "新短信已进入本机加密发送队列");

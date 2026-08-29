@@ -36,6 +36,9 @@ public final class QueueRecoveryAndroidTest {
 
     @After
     public void tearDown() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        WorkManager.getInstance(context).cancelUniqueWork(
+                ForwardScheduler.RETRY_WAKEUP_WORK_NAME);
         database.clear();
         database.clearHistory();
     }
@@ -71,11 +74,14 @@ public final class QueueRecoveryAndroidTest {
 
     @Test
     public void readReceiptRequestRoundTripsEncryptedLocalData() {
+        long carrierTimestamp = System.currentTimeMillis() - 60L * 60L * 1000L;
+        long localReceivedAt = System.currentTimeMillis();
         long expiresAt = System.currentTimeMillis() + 60_000L;
         QueueItem item = new QueueItem(
-                "read-receipt-test", QueueItem.KIND_SMS, System.currentTimeMillis(),
+                "read-receipt-test", QueueItem.KIND_SMS, carrierTimestamp,
                 "10000", "隐私模式转换后的邮件正文", 0, 0, 0,
-                SmsNotificationMatcher.bodyMatchClue("仅用于设备测试的虚构原始短信"));
+                SmsNotificationMatcher.bodyMatchClue("仅用于设备测试的虚构原始短信"),
+                localReceivedAt);
         database.enqueueReadReceipt(item, expiresAt);
 
         List<ReadReceiptRequest> requests = database.readReceiptRequests(System.currentTimeMillis());
@@ -83,6 +89,7 @@ public final class QueueRecoveryAndroidTest {
         assertEquals(item.id, requests.get(0).id);
         assertEquals(item.sender, requests.get(0).sender);
         assertEquals(item.bodyMatchClue, requests.get(0).bodyMatchClue);
+        assertEquals(localReceivedAt, requests.get(0).receivedAt);
         assertEquals(expiresAt, database.earliestReadReceiptExpiry());
         database.removeReadReceipt(item.id);
         assertFalse(database.readReceiptRequests(System.currentTimeMillis()).iterator().hasNext());
@@ -100,6 +107,24 @@ public final class QueueRecoveryAndroidTest {
         assertTrue(database.claimReady(claimedAt + 2L * 60L * 1000L, 1).isEmpty());
         assertEquals(1, database.claimReady(
                 claimedAt + 5L * 60L * 1000L + 1L, 1).size());
+    }
+
+    @Test
+    public void urgentRetryUsesADedicatedWakeupInsteadOfTheNormalSmtpChain() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10006", "虚构的紧急重试唤醒测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markRetry(item.id, 1, now + 60_000L);
+
+        ForwardScheduler.scheduleUrgentRetryFromQueue(context);
+
+        List<WorkInfo> work = WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(ForwardScheduler.RETRY_WAKEUP_WORK_NAME)
+                .get(5L, TimeUnit.SECONDS);
+        assertFalse(work.isEmpty());
+        assertFalse(work.get(0).getState().isFinished());
     }
 
     @Test

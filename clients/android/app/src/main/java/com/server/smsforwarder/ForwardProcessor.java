@@ -32,14 +32,13 @@ final class ForwardProcessor {
         for (QueueItem item : ready) {
             try {
                 dispatch(database, config, item);
-                String successDetail = SmsReadFeature.onForwardSuccess(
-                        context, database, item);
-                database.markSuccess(item.id, item.attempts, successDetail);
+                // SMTP has already accepted the message. Commit delivery and remove it from the
+                // retry queue before optional read-link bookkeeping, so a local Keystore,
+                // SQLite, or WorkManager failure cannot send the accepted email a second time.
+                database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
                 database.remove(item.id);
                 if (QueueItem.KIND_SMS.equals(item.kind)) {
-                    SmsNotificationListener.requestProcessing(context);
-                }
-                if (QueueItem.KIND_SMS.equals(item.kind)) {
+                    startReadLinkBestEffort(context, database, item);
                     AppConfig.setSmsForwarded(context);
                 }
                 AppConfig.setSuccess(
@@ -71,6 +70,31 @@ final class ForwardProcessor {
                 processed,
                 database.count() > 0,
                 database.hasReady(finishedAt));
+    }
+
+    private static void startReadLinkBestEffort(
+            Context context, QueueDatabase database, QueueItem item) {
+        try {
+            String detail = SmsReadFeature.onForwardSuccess(context, database, item);
+            database.updateReadReceiptOutcome(item.id, detail);
+        } catch (RuntimeException ignored) {
+            // Delivery is final. Read linkage is optional and must never requeue an email that
+            // the SMTP server already accepted. The base success detail remains authoritative.
+            try {
+                database.updateReadReceiptOutcome(
+                        item.id,
+                        "SMTP 服务器已接受邮件 · 已读联动暂未启动（本机服务暂时不可用）");
+            } catch (RuntimeException databaseUnavailable) {
+                // There is no safe local recovery action here; importantly, do not retry SMTP.
+            }
+        }
+        try {
+            // If receipt insertion succeeded but cleanup scheduling failed, still give the
+            // listener an immediate chance to process the durable request.
+            SmsNotificationListener.requestProcessing(context);
+        } catch (RuntimeException ignored) {
+            // Notification linkage remains best-effort after final SMTP acceptance.
+        }
     }
 
     private static void dispatch(QueueDatabase database, AppConfig config, QueueItem item)

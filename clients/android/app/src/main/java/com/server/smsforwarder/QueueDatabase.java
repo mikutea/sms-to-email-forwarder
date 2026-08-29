@@ -18,8 +18,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
     private static final int MAX_SMS_ROWS = 500;
     private static final int MAX_NON_SMS_ROWS = 50;
     private static final int MAX_PENDING_ROWS = MAX_SMS_ROWS + MAX_NON_SMS_ROWS;
-    private static final long MAX_PENDING_CIPHERTEXT_CHARS = 8L * 1024L * 1024L;
     private static final int MAX_READ_RECEIPTS = 50;
+    private static final int MAX_HISTORY_ROWS = MAX_PENDING_ROWS + MAX_READ_RECEIPTS;
+    private static final long MAX_PENDING_CIPHERTEXT_CHARS = 8L * 1024L * 1024L;
     private static volatile QueueDatabase instance;
 
     enum EnqueueResult {
@@ -101,7 +102,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     synchronized EnqueueResult enqueueSms(String sender, String body, long receivedAt, int simSlot) {
-        return enqueueSms(sender, body, "", receivedAt, simSlot);
+        return enqueueSms(sender, body, "", receivedAt, System.currentTimeMillis(), simSlot);
     }
 
     synchronized EnqueueResult enqueueSms(
@@ -110,9 +111,21 @@ final class QueueDatabase extends SQLiteOpenHelper {
             String bodyMatchClue,
             long receivedAt,
             int simSlot) {
+        return enqueueSms(
+                sender, body, bodyMatchClue, receivedAt, System.currentTimeMillis(), simSlot);
+    }
+
+    synchronized EnqueueResult enqueueSms(
+            String sender,
+            String body,
+            String bodyMatchClue,
+            long receivedAt,
+            long localReceivedAt,
+            int simSlot) {
         String id = stableSmsId(sender, body, receivedAt, simSlot);
         return insert(
-                id, QueueItem.KIND_SMS, sender, body, bodyMatchClue, receivedAt, simSlot);
+                id, QueueItem.KIND_SMS, sender, body, bodyMatchClue,
+                receivedAt, localReceivedAt, simSlot);
     }
 
     synchronized boolean enqueueTest() {
@@ -124,6 +137,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 "如果你收到这封邮件，说明短信转邮箱 App 的 SMTP 配置可以正常发送邮件。",
                 "",
                 now,
+                now,
                 -1) == EnqueueResult.INSERTED;
     }
 
@@ -132,7 +146,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
         if (QueueItem.KIND_HEARTBEAT.equals(kind) && hasPendingKind(getReadableDatabase(), kind)) {
             return false;
         }
-        return insert(UUID.randomUUID().toString(), kind, title, body, "", now, -1)
+        return insert(UUID.randomUUID().toString(), kind, title, body, "", now, now, -1)
                 == EnqueueResult.INSERTED;
     }
 
@@ -143,6 +157,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             String body,
             String bodyMatchClue,
             long receivedAt,
+            long localReceivedAt,
             int simSlot) {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
@@ -178,7 +193,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             values.put("next_attempt_at", System.currentTimeMillis());
             values.put("lease_until", 0L);
             values.put("delivered_mask", 0);
-            values.put("created_at", System.currentTimeMillis());
+            values.put("created_at", localReceivedAt);
             boolean inserted = database.insertWithOnConflict(
                     "pending_messages",
                     null,
@@ -200,7 +215,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
         database.beginTransaction();
         try (Cursor cursor = database.query(
                 "pending_messages",
-                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted"},
+                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted", "created_at"},
                 "next_attempt_at <= ? AND lease_until <= ?",
                 new String[]{Long.toString(now), Long.toString(now)},
                 null,
@@ -229,7 +244,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
                         cursor.getInt(5),
                         cursor.getInt(6),
                         cursor.getInt(7),
-                        CryptoStore.decrypt(cursor.getString(8))));
+                        CryptoStore.decrypt(cursor.getString(8)),
+                        cursor.getLong(9)));
             }
             database.setTransactionSuccessful();
         } finally {
@@ -320,6 +336,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 item.body,
                 "",
                 item.receivedAt,
+                System.currentTimeMillis(),
                 item.simSlot) == EnqueueResult.INSERTED;
     }
 
@@ -432,7 +449,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
         }
         ContentValues values = new ContentValues();
         values.put("id", item.id);
-        values.put("received_at", item.receivedAt);
+        // pending_messages.created_at is the device-local broadcast/queue time. Carrier SMS
+        // timestamps remain in message metadata but are not trusted for notification matching.
+        values.put("received_at", item.localReceivedAt);
         values.put("sender_encrypted", CryptoStore.encrypt(item.sender));
         // Keep the legacy column empty. Only the bounded original-body clue is needed for
         // matching and it remains encrypted with the device Keystore.
@@ -565,7 +584,10 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 "message_history", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         getWritableDatabase().delete(
                 "message_history",
-                "id NOT IN (SELECT id FROM message_history ORDER BY updated_at DESC LIMIT 500)",
+                "id NOT IN (SELECT id FROM pending_messages) "
+                        + "AND id NOT IN (SELECT id FROM pending_read_receipts) "
+                        + "AND id NOT IN (SELECT id FROM message_history "
+                        + "ORDER BY updated_at DESC LIMIT " + MAX_HISTORY_ROWS + ")",
                 null);
         getWritableDatabase().delete(
                 "message_history",
@@ -728,6 +750,14 @@ final class QueueDatabase extends SQLiteOpenHelper {
         return QueueItem.KIND_SMS.equals(kind)
                 ? smsRows >= MAX_SMS_ROWS
                 : nonSmsRows >= MAX_NON_SMS_ROWS;
+    }
+
+    static int pendingRowCapacity() {
+        return MAX_PENDING_ROWS;
+    }
+
+    static int historyRowCapacity() {
+        return MAX_HISTORY_ROWS;
     }
 
     private static String sanitizeDetail(String detail) {

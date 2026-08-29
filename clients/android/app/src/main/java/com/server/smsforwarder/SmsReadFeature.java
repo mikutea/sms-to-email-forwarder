@@ -42,6 +42,28 @@ final class SmsReadFeature {
         return new ComponentName(context, SmsNotificationListener.class);
     }
 
+    static QueueDatabase.EnqueueResult enqueueIncomingSms(
+            Context context,
+            QueueDatabase database,
+            String sender,
+            String transformedBody,
+            String originalBody,
+            long receivedAt,
+            long localReceivedAt,
+            int simSlot) {
+        synchronized (OPERATION_LOCK) {
+            String clue = isEnabled(context)
+                    ? SmsNotificationMatcher.bodyMatchClue(originalBody) : "";
+            return database.enqueueSms(
+                    sender,
+                    transformedBody,
+                    clue,
+                    receivedAt,
+                    localReceivedAt,
+                    simSlot);
+        }
+    }
+
     static void onForwardSuccess(Context context, QueueDatabase database, QueueItem item) {
         synchronized (OPERATION_LOCK) {
             String detail = "SMTP 服务器已接受邮件";

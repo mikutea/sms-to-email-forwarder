@@ -113,9 +113,21 @@ public final class QueueRecoveryAndroidTest {
                         0));
 
         SmsReadFeature.setEnabled(context, false);
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                SmsReadFeature.enqueueIncomingSms(
+                        context,
+                        database,
+                        "10011",
+                        "关闭后的隐私模式正文",
+                        "关闭后到达的虚构原始短信不得保留线索",
+                        now + 1L,
+                        now + 1L,
+                        0));
 
-        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
-        assertEquals("", item.bodyMatchClue);
+        List<QueueItem> items = database.claimReady(now + 1_000L, 2);
+        assertEquals(2, items.size());
+        assertEquals("", items.get(0).bodyMatchClue);
+        assertEquals("", items.get(1).bodyMatchClue);
     }
 
     @Test

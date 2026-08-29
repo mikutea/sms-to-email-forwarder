@@ -92,12 +92,13 @@ public final class SmsReceiver extends BroadcastReceiver {
             return;
         }
 
-        String bodyMatchClue = SmsReadFeature.isEnabled(context)
-                ? SmsNotificationMatcher.bodyMatchClue(body.toString()) : "";
-        QueueDatabase.EnqueueResult result = QueueDatabase.get(context).enqueueSms(
+        QueueDatabase database = QueueDatabase.get(context);
+        QueueDatabase.EnqueueResult result = SmsReadFeature.enqueueIncomingSms(
+                context,
+                database,
                 sender,
                 MessageFilter.transformBody(body.toString(), rules),
-                bodyMatchClue,
+                body.toString(),
                 receivedAt,
                 localReceivedAt,
                 simSlot);
@@ -107,7 +108,7 @@ public final class SmsReceiver extends BroadcastReceiver {
             AppConfig.setStatus(context, "重复短信广播已忽略");
         } else {
             String id = QueueDatabase.stableSmsId(sender, body.toString(), receivedAt, simSlot);
-            QueueDatabase.get(context).recordFiltered(
+            database.recordFiltered(
                     id,
                     receivedAt,
                     sender,

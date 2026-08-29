@@ -121,6 +121,12 @@ public final class SmsNotificationListener extends NotificationListenerService {
     }
 
     private void processPending() {
+        synchronized (SmsReadFeature.operationLock()) {
+            processPendingWhileOptInCannotChange();
+        }
+    }
+
+    private void processPendingWhileOptInCannotChange() {
         if (!SmsReadFeature.isEnabled(this) || !SmsReadFeature.hasNotificationAccess(this)) {
             return;
         }

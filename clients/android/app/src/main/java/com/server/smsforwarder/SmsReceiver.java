@@ -91,9 +91,12 @@ public final class SmsReceiver extends BroadcastReceiver {
             return;
         }
 
+        String bodyMatchClue = SmsReadFeature.isEnabled(context)
+                ? SmsNotificationMatcher.bodyMatchClue(body.toString()) : "";
         QueueDatabase.EnqueueResult result = QueueDatabase.get(context).enqueueSms(
                 sender,
                 MessageFilter.transformBody(body.toString(), rules),
+                bodyMatchClue,
                 receivedAt,
                 simSlot);
         if (result == QueueDatabase.EnqueueResult.INSERTED) {
@@ -111,8 +114,10 @@ public final class SmsReceiver extends BroadcastReceiver {
                     "待发送队列已满，本条未入队；请恢复网络或清理队列");
             AppConfig.setStatus(context, "待发送队列已达到安全上限，本条短信未入队");
         }
-        if (QueueDatabase.get(context).count() > 0) {
-            ForwardScheduler.scheduleFromQueue(context);
+        if (result == QueueDatabase.EnqueueResult.INSERTED) {
+            // A new SMS must not wait behind an older delayed backoff request.
+            // Urgent work is serialized separately from the normal delayed-retry chain.
+            ForwardScheduler.schedule(context);
         }
     }
 

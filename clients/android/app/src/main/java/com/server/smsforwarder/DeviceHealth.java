@@ -27,6 +27,7 @@ final class DeviceHealth {
     final int batteryPercent;
     final boolean charging;
     final int pendingCount;
+    final PendingStats pendingStats;
     final long lastSuccessAt;
     final long lastSmsReceivedAt;
     final long lastSmsForwardedAt;
@@ -45,7 +46,7 @@ final class DeviceHealth {
             boolean backgroundConfirmed,
             int batteryPercent,
             boolean charging,
-            int pendingCount,
+            PendingStats pendingStats,
             long lastSuccessAt,
             long lastSmsReceivedAt,
             long lastSmsForwardedAt,
@@ -62,7 +63,8 @@ final class DeviceHealth {
         this.backgroundConfirmed = backgroundConfirmed;
         this.batteryPercent = batteryPercent;
         this.charging = charging;
-        this.pendingCount = pendingCount;
+        this.pendingStats = pendingStats;
+        this.pendingCount = pendingStats.total;
         this.lastSuccessAt = lastSuccessAt;
         this.lastSmsReceivedAt = lastSmsReceivedAt;
         this.lastSmsForwardedAt = lastSmsForwardedAt;
@@ -81,6 +83,7 @@ final class DeviceHealth {
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         boolean exempt = powerManager != null
                 && powerManager.isIgnoringBatteryOptimizations(context.getPackageName());
+        PendingStats pendingStats = QueueDatabase.get(context).pendingStats();
         return new DeviceHealth(
                 context.checkSelfPermission(Manifest.permission.RECEIVE_SMS)
                         == PackageManager.PERMISSION_GRANTED,
@@ -94,7 +97,7 @@ final class DeviceHealth {
                 TravelGuard.isBackgroundConfirmed(context),
                 battery.percent,
                 battery.charging,
-                QueueDatabase.get(context).count(),
+                pendingStats,
                 AppConfig.getLastSuccessAt(context),
                 AppConfig.getLastSmsReceivedAt(context),
                 AppConfig.getLastSmsForwardedAt(context),
@@ -138,7 +141,7 @@ final class DeviceHealth {
                 + (charging ? "（充电中）" : "（未充电）")
                 + "\n电池优化豁免：" + yesNo(batteryExempt)
                 + "\n华为后台设置：" + (backgroundConfirmed ? "用户已确认" : "尚未确认")
-                + "\n待发送：" + pendingCount + " 条"
+                + "\n待发送：" + pendingCount + " 条（" + pendingStats.compactLabel() + "）"
                 + "\n最近 SMTP 成功：" + lastSuccess
                 + "\n真实短信闭环：" + realSms;
     }

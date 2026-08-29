@@ -17,10 +17,17 @@ public final class ForwardWorker extends Worker {
         try {
             ForwardProcessor.ProcessResult result = ForwardProcessor.processReady(
                     getApplicationContext(),
-                    20);
+                    1);
+            if (ForwardScheduler.isUrgent(getInputData())
+                    && result.processed > 0
+                    && result.hasReady) {
+                // Urgent work never carries a delayed retry, so new SMS can only wait behind
+                // another active SMTP attempt rather than an old backoff timer.
+                ForwardScheduler.scheduleUrgentSuccessorFromQueue(getApplicationContext());
+            }
             if (result.hasPending) {
-                // Append the follow-up behind this running worker. Replacing the
-                // unique work here would cancel the worker before it can finish.
+                // Delayed retries stay in the normal chain. APPEND_OR_REPLACE appends behind an
+                // active normal worker instead of replacing an SMTP delivery in flight.
                 ForwardScheduler.scheduleSuccessorFromQueue(getApplicationContext());
             }
             return Result.success();

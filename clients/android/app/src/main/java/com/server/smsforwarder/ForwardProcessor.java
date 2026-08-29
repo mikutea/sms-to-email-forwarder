@@ -17,13 +17,13 @@ final class ForwardProcessor {
         if (!config.enabled) {
             // Keep queued data intact, but do not create an immediate WorkManager loop
             // while the owner has deliberately paused forwarding.
-            return new ProcessResult(0, false);
+            return new ProcessResult(0, false, false);
         }
         String validationError = config.validateForForwarding();
         if (validationError != null) {
             AppConfig.setSmtpFailure(context, "配置无效，发送已暂停：" + validationError);
             // Saving a valid configuration or enabling forwarding schedules the queue again.
-            return new ProcessResult(0, false);
+            return new ProcessResult(0, false, false);
         }
 
         QueueDatabase database = QueueDatabase.get(context);
@@ -32,9 +32,13 @@ final class ForwardProcessor {
         for (QueueItem item : ready) {
             try {
                 dispatch(database, config, item);
-                database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
+                String successDetail = SmsReadFeature.onForwardSuccess(
+                        context, database, item);
+                database.markSuccess(item.id, item.attempts, successDetail);
                 database.remove(item.id);
-                processed++;
+                if (QueueItem.KIND_SMS.equals(item.kind)) {
+                    SmsNotificationListener.requestProcessing(context);
+                }
                 if (QueueItem.KIND_SMS.equals(item.kind)) {
                     AppConfig.setSmsForwarded(context);
                 }
@@ -56,9 +60,17 @@ final class ForwardProcessor {
                 AppConfig.setSmtpFailure(
                         context,
                         classified + "，已保留在加密队列中重试");
+            } finally {
+                // Counts claimed rows that completed an SMTP attempt, whether that attempt
+                // succeeded or was moved to a later retry window.
+                processed++;
             }
         }
-        return new ProcessResult(processed, database.count() > 0);
+        long finishedAt = System.currentTimeMillis();
+        return new ProcessResult(
+                processed,
+                database.count() > 0,
+                database.hasReady(finishedAt));
     }
 
     private static void dispatch(QueueDatabase database, AppConfig config, QueueItem item)
@@ -142,10 +154,12 @@ final class ForwardProcessor {
     static final class ProcessResult {
         final int processed;
         final boolean hasPending;
+        final boolean hasReady;
 
-        ProcessResult(int processed, boolean hasPending) {
+        ProcessResult(int processed, boolean hasPending, boolean hasReady) {
             this.processed = processed;
             this.hasPending = hasPending;
+            this.hasReady = hasReady;
         }
     }
 }

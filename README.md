@@ -4,13 +4,13 @@
 [![Latest release](https://img.shields.io/github/v/release/mikutea/sms-to-email-forwarder?display_name=tag)](https://github.com/mikutea/sms-to-email-forwarder/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2f806e.svg)](LICENSE)
 
-雁笺是一款面向自有 Android / 鸿蒙 2–4 设备的短信转邮箱应用。新短信在手机本地进入加密队列，再直连用户自己的 SMTP 服务；不需要第三方中继服务器、Root、无障碍或通知读取权限。
+雁笺是一款面向自有 Android / 鸿蒙 2–4 设备的短信转邮箱应用。新短信在手机本地进入加密队列，再直连用户自己的 SMTP 服务；不需要第三方中继服务器、Root 或无障碍权限。可选的“成功后标记已读”默认关闭，只有用户主动授予系统通知使用权后才工作，且不作为短信接收来源。
 
 > 当前稳定版：`v1.1.0`。正式版与 Beta 使用同一签名，可覆盖安装并保留本机配置。厂商启动管理不存在普通 App 可统一弹出的标准授权框，雁笺会打开设备可用的系统入口，并在返回后立即确认结果。
 
 [下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.0.apk) · [查看发布说明](docs/release-notes/1.1.0.md) · [安装与后台设置](docs/harmonyos-4-install.md)
 
-> 当前测试版：[`v1.1.1-beta.5`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.5)，修复正式包在提交 HTML + 纯文本邮件时缺失 JavaMail 内容处理器的问题，并加入压缩后 APK 硬性回归检查。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.5/yanjian-v1.1.1-beta.5.apk)
+> 当前测试版：[`v1.1.1-beta.6`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.6)，修复历史待发消息长期停留、立即重试不立即和心跳重复堆积，并新增默认关闭的安全短信已读联动。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.6/yanjian-v1.1.1-beta.6.apk)
 
 ## 应用截图
 
@@ -30,16 +30,23 @@
   <img src="docs/screenshots/1.1.1-beta.1/08-open-source.png" width="23%" alt="开源许可" />
 </p>
 
+Beta 6 新增的默认关闭已读联动与通知授权说明：
+
+<p align="center">
+  <img src="docs/screenshots/1.1.1-beta.6/01-privacy-mark-read.png" width="28%" alt="隐私与安全页面中的短信已读联动" />
+</p>
+
 ## 核心能力
 
 - 接收新短信后调度秒级发送，不读取历史短信；支持多段长短信合并和双卡卡槽规则。
 - 邮件同时提供移动端友好的 HTML 主视图和纯文本兼容视图，显示发送方、SIM、接收时间、正文与投递编号。
-- AES-GCM 加密本机待发队列与历史记录；稳定消息 ID、并发租约、指数退避、容量上限和断网恢复。
+- AES-GCM 加密本机待发队列与历史记录；稳定消息 ID、并发租约、指数退避、分类容量、断网恢复和一键立即补发。
 - 主/备用 SMTP、多个收件人，以及主通道、失败切换、双通道三种投递策略。
 - 仅允许 SMTP over TLS 或强制 STARTTLS，并保持服务器证书主机名校验。
 - 发送方白名单/黑名单、关键词、线性时间正则、验证码、时段、星期和正文脱敏规则。
 - 旅行守护：真实短信闭环门槛、后台授权引导、6/12/24 小时心跳、低电量与断电提醒。
 - 加密历史、失败重发、队列清理、规则预览、无密码配置导入导出和脱敏诊断报告。
+- 可选“转发成功后标记系统短信已读”：只匹配默认短信应用和语义明确的标准动作；无动作、匹配不唯一或未授权时保持原状，不影响邮件成功状态。
 - 稳定版 / Beta 更新通道和应用内下载；安装前校验资产摘要、包名、版本代码与签名证书，最终覆盖安装由系统和用户确认。
 - “月白青玉”视觉：统一折纸飞雁图标、软拟态内容层、玻璃一级导航和遵循系统“减少动画”设置的短动画。
 
@@ -74,6 +81,8 @@ SIM 新短信
 4. 在“设置 → 后台授权”完成短信、忽略电池优化和厂商启动管理；返回雁笺后确认一次厂商设置。
 5. 进入“锁屏试投”，用一条真实短信完成亮屏、锁屏、Wi-Fi、移动网络和断网补发验收。
 6. 所有离家条件均通过后，再开启旅行守护。
+
+如需邮件成功后同步系统短信已读状态，可在“设置 → 隐私与安全”单独开启并授予通知使用权。该授权范围由 Android 系统定义，可能允许查看其他应用通知；雁笺只在短信已成功投递后临时匹配默认短信应用通知。为兼容正文脱敏规则，开启功能后仅把原短信最多 16 个规范化字符作为 Keystore 加密匹配线索保存在待发队列中；不会把其他通知正文写入队列、历史或诊断报告。
 
 详见 [SMTP 配置与安全](docs/smtp-configuration.md)、[旅行守护验收](docs/travel-mode.md)、[隐私与安全](docs/privacy-and-security.md) 和 [平台支持边界](docs/platform-support.md)。
 

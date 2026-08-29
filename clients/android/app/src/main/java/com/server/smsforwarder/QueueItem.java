@@ -14,6 +14,7 @@ final class QueueItem {
     final int simSlot;
     final int attempts;
     final int deliveredMask;
+    final String bodyMatchClue;
 
     QueueItem(
             String id,
@@ -23,7 +24,7 @@ final class QueueItem {
             String body,
             int simSlot,
             int attempts) {
-        this(id, kind, receivedAt, sender, body, simSlot, attempts, 0);
+        this(id, kind, receivedAt, sender, body, simSlot, attempts, 0, "");
     }
 
     QueueItem(
@@ -35,6 +36,19 @@ final class QueueItem {
             int simSlot,
             int attempts,
             int deliveredMask) {
+        this(id, kind, receivedAt, sender, body, simSlot, attempts, deliveredMask, "");
+    }
+
+    QueueItem(
+            String id,
+            String kind,
+            long receivedAt,
+            String sender,
+            String body,
+            int simSlot,
+            int attempts,
+            int deliveredMask,
+            String bodyMatchClue) {
         this.id = id;
         this.kind = kind;
         this.receivedAt = receivedAt;
@@ -43,5 +57,6 @@ final class QueueItem {
         this.simSlot = simSlot;
         this.attempts = attempts;
         this.deliveredMask = deliveredMask;
+        this.bodyMatchClue = bodyMatchClue == null ? "" : bodyMatchClue;
     }
 }

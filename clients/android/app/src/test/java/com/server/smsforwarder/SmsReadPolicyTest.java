@@ -23,4 +23,12 @@ public final class SmsReadPolicyTest {
         assertTrue(SmsReadFeature.isEligibleForReadLink(realReceipt));
         assertFalse(SmsReadFeature.isEligibleForReadLink(manualResend));
     }
+
+    @Test
+    public void finalDispatchRequiresPreferencePermissionAndReceipt() {
+        assertTrue(SmsReadFeature.canDispatchReadAction(true, true, true));
+        assertFalse(SmsReadFeature.canDispatchReadAction(false, true, true));
+        assertFalse(SmsReadFeature.canDispatchReadAction(true, false, true));
+        assertFalse(SmsReadFeature.canDispatchReadAction(true, true, false));
+    }
 }

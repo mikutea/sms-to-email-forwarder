@@ -34,7 +34,7 @@ public final class SmsNotificationMatcherTest {
                 "另一条会话和完全不同的内容");
 
         assertTrue(matching >= 8);
-        assertEquals(2, timeOnly);
+        assertEquals(-1, timeOnly);
         assertTrue(SmsNotificationMatcher.isConfident(matching, timeOnly, 2));
         assertFalse(SmsNotificationMatcher.isConfident(timeOnly, timeOnly, 2));
     }
@@ -84,6 +84,20 @@ public final class SmsNotificationMatcherTest {
                 receivedAt + 24L * 60L * 60L * 1000L,
                 "10690001 新消息 您的旅行验证码123456",
                 "10690001 新消息");
+
+        assertEquals(-1, score);
+    }
+
+    @Test
+    public void newerMessageFromTheSameSenderCannotReplaceTheCluedSms() {
+        long receivedAt = 1_000_000L;
+
+        int score = SmsNotificationMatcher.score(
+                receivedAt,
+                "10690001",
+                "第一条旅行验证码123456",
+                receivedAt + 30_000L,
+                "10690001 第二条旅行验证码654321");
 
         assertEquals(-1, score);
     }

@@ -117,7 +117,10 @@ final class SmsReadFeature {
             String id,
             PendingIntent actionIntent) throws PendingIntent.CanceledException {
         synchronized (OPERATION_LOCK) {
-            if (!isEnabled(context) || !database.hasReadReceipt(id)) {
+            if (!canDispatchReadAction(
+                    isEnabled(context),
+                    hasNotificationAccess(context),
+                    database.hasReadReceipt(id))) {
                 return false;
             }
             actionIntent.send();
@@ -141,6 +144,11 @@ final class SmsReadFeature {
     static boolean hasCurrentReadLinkGeneration(Context context, QueueItem item) {
         return item.readLinkGeneration > 0L
                 && item.readLinkGeneration == currentGeneration(context);
+    }
+
+    static boolean canDispatchReadAction(
+            boolean featureEnabled, boolean notificationAccess, boolean receiptPresent) {
+        return featureEnabled && notificationAccess && receiptPresent;
     }
 
     static Object operationLock() {

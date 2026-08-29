@@ -52,8 +52,14 @@ final class SmsNotificationMatcher {
         String haystack = normalize(
                 delta > LATE_TOLERANCE_MS ? currentEventText : notificationText);
         String normalizedBodyClue = normalize(bodyMatchClue);
-        boolean bodyMatches = normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS
-                && haystack.contains(normalizedBodyClue);
+        boolean hasBodyClue = normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS;
+        boolean bodyMatches = hasBodyClue && haystack.contains(normalizedBodyClue);
+        // When an original-body clue exists it is stronger than sender/time evidence. A default
+        // SMS app can replace the active notification with a newer message from the same sender,
+        // so a clue mismatch must disqualify that candidate instead of merely lowering its score.
+        if (hasBodyClue && !bodyMatches) {
+            return -1;
+        }
         // Some default SMS apps refresh an existing notification's post time when their group is
         // updated. After a long offline SMTP delay, accept such an active notification only when
         // the bounded original-body clue still identifies it; sender or time alone is not enough.

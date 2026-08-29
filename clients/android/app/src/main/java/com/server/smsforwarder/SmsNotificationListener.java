@@ -19,6 +19,10 @@ import java.util.concurrent.Executors;
 
 public final class SmsNotificationListener extends NotificationListenerService {
     private static final long ACTION_SETTLE_MS = 3_000L;
+    // Use the stable wire keys directly so API 23 can inspect MessagingStyle extras without
+    // referencing constants added in API 24/26.
+    private static final String EXTRA_MESSAGES_COMPAT = "android.messages";
+    private static final String EXTRA_HISTORIC_MESSAGES_COMPAT = "android.messages.historic";
     private static volatile SmsNotificationListener connectedInstance;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -287,8 +291,8 @@ public final class SmsNotificationListener extends NotificationListenerService {
                 append(result, line);
             }
         }
-        appendMessages(result, extras.getParcelableArray(Notification.EXTRA_MESSAGES));
-        appendMessages(result, extras.getParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES));
+        appendMessages(result, extras.getParcelableArray(EXTRA_MESSAGES_COMPAT));
+        appendMessages(result, extras.getParcelableArray(EXTRA_HISTORIC_MESSAGES_COMPAT));
         return result.toString();
     }
 
@@ -302,7 +306,7 @@ public final class SmsNotificationListener extends NotificationListenerService {
         append(result, extras.getCharSequence(Notification.EXTRA_TEXT));
         append(result, extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
         append(result, extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
-        appendLatestMessage(result, extras.getParcelableArray(Notification.EXTRA_MESSAGES));
+        appendLatestMessage(result, extras.getParcelableArray(EXTRA_MESSAGES_COMPAT));
         return result.toString();
     }
 

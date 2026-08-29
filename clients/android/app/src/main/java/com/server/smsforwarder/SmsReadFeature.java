@@ -261,9 +261,19 @@ final class SmsReadFeature {
         synchronized (OPERATION_LOCK) {
             SharedPreferences preferences = prefs(context);
             long generation = preferences.getLong(KEY_GENERATION, 1L);
-            preferences.edit()
+            boolean persisted = preferences.edit()
                     .putLong(KEY_GENERATION, generation == Long.MAX_VALUE ? 1L : generation + 1L)
                     .commit();
+            if (!persisted) {
+                runtimeForceDisabled = true;
+            }
+            requireGenerationInvalidationPersisted(persisted);
+        }
+    }
+
+    static void requireGenerationInvalidationPersisted(boolean persisted) {
+        if (!persisted) {
+            throw new IllegalStateException("无法安全更新已读联动状态，队列未清空");
         }
     }
 

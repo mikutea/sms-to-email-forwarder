@@ -2094,9 +2094,17 @@ public final class MainActivity extends Activity {
                 "清空待发送队列？",
                 "将删除 " + count + " 条尚未成功发送的加密短信、心跳或提醒，删除后无法恢复。",
                 "确认删除", () -> {
-                    QueueDatabase.get(this).clear();
-                    AppConfig.setStatus(this, "待发送队列已由用户清空");
-                    showPage(currentPage);
+                    try {
+                        QueueDatabase.get(this).clear();
+                        AppConfig.setStatus(this, "待发送队列已由用户清空");
+                        showPage(currentPage);
+                    } catch (RuntimeException error) {
+                        AppConfig.setStatus(this, "安全状态更新失败，本次未清空待发送队列");
+                        showGlassDialog(
+                                "暂时无法安全清空",
+                                "已读联动状态未能安全更新，本次没有删除待发送数据。请稍后重试。",
+                                "知道了", null, null);
+                    }
                 }, "取消");
     }
 

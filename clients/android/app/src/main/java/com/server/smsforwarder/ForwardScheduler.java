@@ -70,6 +70,10 @@ final class ForwardScheduler {
         }
     }
 
+    static boolean shouldReconcileAfterDuplicate(QueueDatabase.EnqueueResult result) {
+        return result == QueueDatabase.EnqueueResult.DUPLICATE;
+    }
+
     static void scheduleFromQueue(Context context) {
         scheduleNormalFromQueue(context, ExistingWorkPolicy.KEEP);
     }

@@ -121,6 +121,10 @@ public final class SmsReceiver extends BroadcastReceiver {
             // A new SMS must not wait behind an older delayed backoff request.
             // Urgent work is serialized separately from the normal delayed-retry chain.
             ForwardScheduler.schedule(context);
+        } else if (ForwardScheduler.shouldReconcileAfterDuplicate(result)) {
+            // The original broadcast may have died after committing the row but before scheduling
+            // it. A duplicate is therefore also a durable recovery signal for the existing queue.
+            ForwardScheduler.reconcile(context);
         }
     }
 

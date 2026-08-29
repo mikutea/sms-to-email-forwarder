@@ -51,4 +51,14 @@ public final class QueuePolicyTest {
         assertTrue(stats.compactLabel().contains("提醒 1"));
         assertTrue(stats.compactLabel().contains("其他 3"));
     }
+
+    @Test
+    public void onlyDuplicateSmsEnqueueResultsReconcileExistingQueueWork() {
+        assertTrue(ForwardScheduler.shouldReconcileAfterDuplicate(
+                QueueDatabase.EnqueueResult.DUPLICATE));
+        assertFalse(ForwardScheduler.shouldReconcileAfterDuplicate(
+                QueueDatabase.EnqueueResult.INSERTED));
+        assertFalse(ForwardScheduler.shouldReconcileAfterDuplicate(
+                QueueDatabase.EnqueueResult.CAPACITY_REACHED));
+    }
 }

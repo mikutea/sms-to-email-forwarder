@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class ReadReceiptCleanupWorker extends Worker {
     static final String WORK_NAME = "sms_read_receipt_cleanup";
+    static final String PRIVACY_WORK_NAME = "sms_read_privacy_cleanup";
     static final String INPUT_FORCE_PRIVACY_CLEANUP = "force_privacy_cleanup";
 
     public ReadReceiptCleanupWorker(
@@ -97,7 +98,7 @@ public final class ReadReceiptCleanupWorker extends Worker {
         Context applicationContext = context.getApplicationContext();
         try {
             Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                    WORK_NAME,
+                    immediateWorkName(disabledCleanup),
                     ExistingWorkPolicy.REPLACE,
                     request);
             operation.getResult().addListener(() -> {
@@ -133,6 +134,12 @@ public final class ReadReceiptCleanupWorker extends Worker {
         return new Data.Builder()
                 .putBoolean(INPUT_FORCE_PRIVACY_CLEANUP, disabledCleanup)
                 .build();
+    }
+
+    static String immediateWorkName(boolean disabledCleanup) {
+        // Ordinary receipt reconciliation may be replaced freely, but it must never replace the
+        // only durable record of an opt-out whose preference commits both failed.
+        return disabledCleanup ? PRIVACY_WORK_NAME : WORK_NAME;
     }
 
     private static void schedule(Context context, ExistingWorkPolicy policy) {

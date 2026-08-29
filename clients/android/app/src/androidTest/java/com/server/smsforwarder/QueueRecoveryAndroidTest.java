@@ -455,6 +455,10 @@ public final class QueueRecoveryAndroidTest {
                 .cancelUniqueWork(ReadReceiptCleanupWorker.WORK_NAME)
                 .getResult()
                 .get(5L, TimeUnit.SECONDS);
+        WorkManager.getInstance(context)
+                .cancelUniqueWork(ReadReceiptCleanupWorker.PRIVACY_WORK_NAME)
+                .getResult()
+                .get(5L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -502,6 +506,18 @@ public final class QueueRecoveryAndroidTest {
         SmsReadFeature.reconcileDisabledLinkageData(context, forcedPrivacyCleanup);
         assertFalse(SmsReadFeature.isEnabled(context));
         assertFalse(SmsReadFeature.isCleanupPending(context));
+    }
+
+    @Test
+    public void ordinaryReceiptReconcileCannotReplaceForcedPrivacyCleanup() {
+        assertFalse(ReadReceiptCleanupWorker.immediateWorkName(true)
+                .equals(ReadReceiptCleanupWorker.immediateWorkName(false)));
+        assertEquals(
+                ReadReceiptCleanupWorker.PRIVACY_WORK_NAME,
+                ReadReceiptCleanupWorker.immediateWorkName(true));
+        assertEquals(
+                ReadReceiptCleanupWorker.WORK_NAME,
+                ReadReceiptCleanupWorker.immediateWorkName(false));
     }
 
     @Test

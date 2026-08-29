@@ -381,6 +381,18 @@ final class QueueDatabase extends SQLiteOpenHelper {
         updateHistory(id, "SUCCESS", attempts, detail);
     }
 
+    synchronized void completeAcceptedDelivery(String id, int attempts, String detail) {
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try {
+            updateHistoryLocked(database, id, "SUCCESS", attempts, detail);
+            database.delete("pending_messages", "id = ?", new String[]{id});
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
+        }
+    }
+
     synchronized void recordFiltered(
             String id,
             long receivedAt,
@@ -785,12 +797,21 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     private synchronized void updateHistory(String id, String status, int attempts, String detail) {
+        updateHistoryLocked(getWritableDatabase(), id, status, attempts, detail);
+    }
+
+    private static void updateHistoryLocked(
+            SQLiteDatabase database,
+            String id,
+            String status,
+            int attempts,
+            String detail) {
         ContentValues values = new ContentValues();
         values.put("status", status);
         values.put("attempts", attempts);
         values.put("detail", sanitizeDetail(detail));
         values.put("updated_at", System.currentTimeMillis());
-        getWritableDatabase().update("message_history", values, "id = ?", new String[]{id});
+        database.update("message_history", values, "id = ?", new String[]{id});
     }
 
     private static void createHistoryTable(SQLiteDatabase database) {

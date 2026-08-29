@@ -339,6 +339,35 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void acceptedDeliveryFinalizationRollsBackWhenPendingRemovalFails() {
+        long now = System.currentTimeMillis();
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10024", "虚构的成功状态原子提交测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.execSQL("CREATE TEMP TRIGGER fail_accepted_pending_delete "
+                + "BEFORE DELETE ON pending_messages "
+                + "BEGIN SELECT RAISE(ABORT, 'forced accepted-delete failure'); END");
+
+        boolean failed = false;
+        try {
+            database.completeAcceptedDelivery(
+                    item.id,
+                    item.attempts,
+                    "SMTP 服务器已接受邮件");
+        } catch (RuntimeException expected) {
+            failed = true;
+        } finally {
+            writable.execSQL("DROP TRIGGER IF EXISTS fail_accepted_pending_delete");
+        }
+
+        assertTrue(failed);
+        assertEquals(1, database.count());
+        assertEquals("SENDING", database.recentHistory(5).get(0).status);
+    }
+
+    @Test
     public void failedEnqueueRecoveryUsesAPrivateExplicitAlarm() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
@@ -346,6 +375,17 @@ public final class QueueRecoveryAndroidTest {
         assertTrue(ForwardScheduler.hasEnqueueRecovery(context));
         ForwardScheduler.cancelEnqueueRecovery(context);
         assertFalse(ForwardScheduler.hasEnqueueRecovery(context));
+    }
+
+    @Test
+    public void asynchronousNormalEnqueueFailureArmsPrivateRecoveryAlarm() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+
+        ForwardScheduler.handleNormalEnqueueFailure(
+                context,
+                new IllegalStateException("synthetic normal enqueue failure"));
+
+        assertTrue(ForwardScheduler.hasEnqueueRecovery(context));
     }
 
     @Test

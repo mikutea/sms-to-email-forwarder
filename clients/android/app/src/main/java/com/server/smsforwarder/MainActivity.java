@@ -3844,7 +3844,12 @@ public final class MainActivity extends Activity {
                 13f, color, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (!"FILTERED".equals(item.status)) {
             boolean visualRow = visualTestMode && item.id.startsWith("visual-");
-            if (!visualRow || "visual-2".equals(item.id) || "visual-4".equals(item.id)) {
+            boolean actionableRealRow = !visualRow
+                    && (ForwardScheduler.isRetryOnlyHistoryStatus(item.status)
+                    || ForwardScheduler.isExplicitHistoryResendStatus(item.status));
+            boolean actionableVisualRow = visualRow
+                    && ("visual-2".equals(item.id) || "visual-4".equals(item.id));
+            if (actionableRealRow || actionableVisualRow) {
                 heading.addView(historyRetryButton(item),
                         new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(32)));
             }
@@ -3877,7 +3882,9 @@ public final class MainActivity extends Activity {
     }
 
     private Button historyRetryButton(HistoryItem item) {
-        Button resend = secondaryButton("RETRY_WAIT".equals(item.status) ? "立即重试" : "重新转发");
+        Button resend = secondaryButton(
+                ForwardScheduler.isRetryOnlyHistoryStatus(item.status)
+                        ? "立即重试" : "重新转发");
         resend.setTextSize(11f);
         resend.setMinHeight(dp(MIN_TOUCH_DP));
         resend.setPadding(dp(9), dp(2), dp(9), dp(2));

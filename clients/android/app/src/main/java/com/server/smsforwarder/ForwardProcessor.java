@@ -76,14 +76,13 @@ final class ForwardProcessor {
 
     private static void completeAcceptedDeliveryLocked(
             Context context, QueueDatabase database, QueueItem item) {
-        // Preserve a useful history record when possible, but removal from the SMTP queue is the
-        // authoritative delivery transition. A history-only failure must not retain the email.
-        try {
-            database.markSuccess(item.id, item.attempts, "SMTP 服务器已接受邮件");
-        } catch (RuntimeException ignored) {
-            // Continue to the authoritative queue removal below.
-        }
-        database.remove(item.id);
+        // The terminal history state and pending-row removal are one local transaction. If local
+        // persistence fails after SMTP acceptance, the delivered-channel mask already prevents
+        // an automatic SMTP resend while the worker retries this finalization.
+        database.completeAcceptedDelivery(
+                item.id,
+                item.attempts,
+                "SMTP 服务器已接受邮件");
         if (QueueItem.KIND_SMS.equals(item.kind)) {
             startReadLinkBestEffort(context, database, item);
             AppConfig.setSmsForwarded(context);

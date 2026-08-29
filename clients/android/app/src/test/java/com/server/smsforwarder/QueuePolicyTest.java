@@ -67,5 +67,8 @@ public final class QueuePolicyTest {
         assertTrue(ForwardScheduler.isRetryOnlyHistoryStatus("RETRY_WAIT"));
         assertFalse(ForwardScheduler.isRetryOnlyHistoryStatus("SUCCESS"));
         assertFalse(ForwardScheduler.isRetryOnlyHistoryStatus("FAILED"));
+        assertTrue(ForwardScheduler.isExplicitHistoryResendStatus("SUCCESS"));
+        assertFalse(ForwardScheduler.isExplicitHistoryResendStatus("SENDING"));
+        assertFalse(ForwardScheduler.isExplicitHistoryResendStatus("QUEUED"));
     }
 }

@@ -80,6 +80,12 @@ final class ForwardScheduler {
         return "RETRY_WAIT".equals(status);
     }
 
+    static boolean isExplicitHistoryResendStatus(String status) {
+        // Intermediate queue states are not user-resend candidates. Only an already terminal,
+        // successful history record offers the deliberately explicit resend action.
+        return "SUCCESS".equals(status);
+    }
+
     static void scheduleFromQueue(Context context) {
         scheduleNormalFromQueue(context, ExistingWorkPolicy.KEEP);
     }
@@ -183,10 +189,34 @@ final class ForwardScheduler {
             Context context,
             long minimumLatencyMs,
             ExistingWorkPolicy policy) {
-        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(
-                WORK_NAME,
-                policy,
-                buildRequest(minimumLatencyMs, false, ""));
+        Context applicationContext = context.getApplicationContext();
+        try {
+            Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    WORK_NAME,
+                    policy,
+                    buildRequest(minimumLatencyMs, false, ""));
+            operation.getResult().addListener(() -> {
+                try {
+                    operation.getResult().get();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    handleNormalEnqueueFailure(applicationContext, error);
+                } catch (ExecutionException | RuntimeException error) {
+                    handleNormalEnqueueFailure(applicationContext, error);
+                }
+            }, Runnable::run);
+        } catch (RuntimeException error) {
+            handleNormalEnqueueFailure(applicationContext, error);
+            throw error;
+        }
+    }
+
+    static void handleNormalEnqueueFailure(Context context, Throwable error) {
+        scheduleEnqueueRecovery(context);
+        AppConfig.setStatus(
+                context,
+                "后台后继任务调度失败，已安排系统闹钟继续恢复："
+                        + ForwardProcessor.safeMessage(error));
     }
 
     private static OneTimeWorkRequest buildRequest(

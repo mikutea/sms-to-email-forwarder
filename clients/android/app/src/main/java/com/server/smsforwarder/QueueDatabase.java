@@ -662,6 +662,13 @@ final class QueueDatabase extends SQLiteOpenHelper {
         }
     }
 
+    synchronized boolean consumeUnexpiredReadReceipt(String id, long now) {
+        return getWritableDatabase().delete(
+                "pending_read_receipts",
+                "id = ? AND expires_at > ?",
+                new String[]{id, Long.toString(now)}) == 1;
+    }
+
     synchronized void cancelReadReceipts(String detail) {
         List<String> ids = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().query(

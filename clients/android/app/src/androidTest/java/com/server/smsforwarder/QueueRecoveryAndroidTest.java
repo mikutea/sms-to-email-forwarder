@@ -467,6 +467,21 @@ public final class QueueRecoveryAndroidTest {
 
         synchronized (SmsReadFeature.operationLock()) {
             assertFalse(database.hasUnexpiredReadReceipt(item.id, now));
+            assertFalse(database.consumeUnexpiredReadReceipt(item.id, now));
+        }
+    }
+
+    @Test
+    public void anUnexpiredReadReceiptCanBeConsumedOnlyOnce() {
+        long now = System.currentTimeMillis();
+        QueueItem item = new QueueItem(
+                "single-read-dispatch", QueueItem.KIND_SMS, now,
+                "10021", "虚构的单次消费测试", 0, 0);
+        database.enqueueReadReceipt(item, now + 60_000L);
+
+        synchronized (SmsReadFeature.operationLock()) {
+            assertTrue(database.consumeUnexpiredReadReceipt(item.id, now));
+            assertFalse(database.consumeUnexpiredReadReceipt(item.id, now));
         }
     }
 

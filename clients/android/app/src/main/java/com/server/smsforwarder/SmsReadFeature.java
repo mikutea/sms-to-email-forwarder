@@ -16,35 +16,59 @@ final class SmsReadFeature {
     private static final String KEY_CLEANUP_PENDING = "cleanup_pending";
     private static final long REQUEST_TTL_MS = 10L * 60L * 1000L;
     private static final Object OPERATION_LOCK = new Object();
+    private static volatile boolean runtimeForceDisabled;
 
     private SmsReadFeature() {
     }
 
     static boolean isEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_ENABLED, false);
+        return !runtimeForceDisabled && prefs(context).getBoolean(KEY_ENABLED, false);
     }
 
     static void setEnabled(Context context, boolean enabled) {
         synchronized (OPERATION_LOCK) {
             SharedPreferences preferences = prefs(context);
-            if (enabled && preferences.getBoolean(KEY_CLEANUP_PENDING, false)) {
-                clearReadLinkData(context);
-                preferences.edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
+            if (enabled) {
+                // Keep the process fail-closed until both deferred cleanup and the durable enable
+                // transition complete. A failed commit must never leave this process opted in.
+                boolean cleanupRequired = runtimeForceDisabled
+                        || preferences.getBoolean(KEY_CLEANUP_PENDING, false);
+                runtimeForceDisabled = true;
+                if (cleanupRequired) {
+                    clearReadLinkData(context);
+                }
+                long generation = preferences.getLong(KEY_GENERATION, 1L);
+                if (!preferences.edit()
+                        .putBoolean(KEY_ENABLED, true)
+                        .putLong(KEY_GENERATION, generation)
+                        .putBoolean(KEY_CLEANUP_PENDING, false)
+                        .commit()) {
+                    throw new IllegalStateException("无法持久化已读联动开启状态");
+                }
+                runtimeForceDisabled = false;
+                return;
             }
+
+            runtimeForceDisabled = true;
             boolean wasEnabled = preferences.getBoolean(KEY_ENABLED, false);
             long generation = preferences.getLong(KEY_GENERATION, 1L);
-            if (!enabled && wasEnabled) {
+            if (wasEnabled) {
                 generation = generation == Long.MAX_VALUE ? 1L : generation + 1L;
             }
-            preferences.edit()
-                    .putBoolean(KEY_ENABLED, enabled)
+            boolean disabledStatePersisted = preferences.edit()
+                    .putBoolean(KEY_ENABLED, false)
                     .putLong(KEY_GENERATION, generation)
-                    .putBoolean(KEY_CLEANUP_PENDING, !enabled)
+                    .putBoolean(KEY_CLEANUP_PENDING, true)
                     .commit();
-            if (!enabled) {
-                SmsNotificationListener.onFeatureDisabled();
-                clearReadLinkData(context);
-                preferences.edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
+            SmsNotificationListener.onFeatureDisabled();
+            clearReadLinkData(context);
+            boolean cleanupStatePersisted = preferences.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putLong(KEY_GENERATION, generation)
+                    .putBoolean(KEY_CLEANUP_PENDING, false)
+                    .commit();
+            if (!disabledStatePersisted && !cleanupStatePersisted) {
+                throw new IllegalStateException("无法持久化已读联动关闭状态");
             }
         }
     }
@@ -85,9 +109,27 @@ final class SmsReadFeature {
                 setEnabled(context, false);
                 return;
             }
+            SharedPreferences preferences = prefs(context);
+            boolean storedEnabled = preferences.getBoolean(KEY_ENABLED, false);
+            long generation = preferences.getLong(KEY_GENERATION, 1L);
+            if (storedEnabled) {
+                generation = generation == Long.MAX_VALUE ? 1L : generation + 1L;
+            }
+            boolean disabledStatePersisted = preferences.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putLong(KEY_GENERATION, generation)
+                    .putBoolean(KEY_CLEANUP_PENDING, true)
+                    .commit();
             SmsNotificationListener.onFeatureDisabled();
             clearReadLinkData(context);
-            prefs(context).edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
+            boolean cleanupStatePersisted = preferences.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putLong(KEY_GENERATION, generation)
+                    .putBoolean(KEY_CLEANUP_PENDING, false)
+                    .commit();
+            if (!disabledStatePersisted && !cleanupStatePersisted) {
+                throw new IllegalStateException("无法持久化已读联动清理状态");
+            }
         }
     }
 
@@ -174,13 +216,13 @@ final class SmsReadFeature {
             PendingIntent actionIntent) throws PendingIntent.CanceledException {
         synchronized (OPERATION_LOCK) {
             if (!canDispatchReadAction(
-                    isEnabled(context),
-                    hasNotificationAccess(context),
-                    database.hasUnexpiredReadReceipt(id, System.currentTimeMillis()))) {
+                    isEnabled(context), hasNotificationAccess(context), true)) {
+                return false;
+            }
+            if (!database.consumeUnexpiredReadReceipt(id, System.currentTimeMillis())) {
                 return false;
             }
             actionIntent.send();
-            database.removeReadReceipt(id);
             database.updateReadReceiptOutcome(
                     id,
                     "SMTP 服务器已接受邮件 · 已请求默认短信应用标记已读（结果由短信应用处理）");

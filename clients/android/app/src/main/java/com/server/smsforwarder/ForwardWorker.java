@@ -26,7 +26,8 @@ public final class ForwardWorker extends Worker {
             }
             ForwardProcessor.ProcessResult result = ForwardProcessor.processReady(
                     getApplicationContext(),
-                    1);
+                    1,
+                    urgent);
             if (urgent) {
                 if (result.processed > 0 && result.hasReady) {
                     // Urgent work never carries a delayed retry, so new SMS can only wait behind

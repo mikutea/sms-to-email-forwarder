@@ -22,6 +22,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
     private static final int MAX_HISTORY_ROWS = MAX_PENDING_ROWS + MAX_READ_RECEIPTS;
     private static final long MAX_PENDING_CIPHERTEXT_CHARS = 8L * 1024L * 1024L;
     private static volatile QueueDatabase instance;
+    private final Context applicationContext;
 
     enum EnqueueResult {
         INSERTED,
@@ -42,6 +43,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
 
     private QueueDatabase(Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
+        applicationContext = context.getApplicationContext();
     }
 
     @Override
@@ -293,6 +295,10 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     synchronized List<QueueItem> claimReady(long now, int limit) {
+        return claimReady(now, limit, false);
+    }
+
+    synchronized List<QueueItem> claimReady(long now, int limit, boolean prioritizeSms) {
         List<QueueItem> items = new ArrayList<>();
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
@@ -303,7 +309,10 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 new String[]{Long.toString(now), Long.toString(now)},
                 null,
                 null,
-                "created_at ASC",
+                prioritizeSms
+                        ? "CASE WHEN kind = '" + QueueItem.KIND_SMS
+                        + "' THEN 0 ELSE 1 END, created_at ASC"
+                        : "created_at ASC",
                 Integer.toString(limit))) {
             while (cursor.moveToNext()) {
                 String id = cursor.getString(0);
@@ -532,9 +541,14 @@ final class QueueDatabase extends SQLiteOpenHelper {
         }
     }
 
-    synchronized void clear() {
-        getWritableDatabase().delete("pending_messages", null, null);
-        cancelReadReceipts("SMTP 服务器已接受邮件 · 已读联动请求已由用户清除");
+    void clear() {
+        synchronized (SmsReadFeature.operationLock()) {
+            SmsReadFeature.invalidateReadLinkGeneration(applicationContext);
+            synchronized (this) {
+                getWritableDatabase().delete("pending_messages", null, null);
+                cancelReadReceipts("SMTP 服务器已接受邮件 · 已读联动请求已由用户清除");
+            }
+        }
     }
 
     synchronized void enqueueReadReceipt(QueueItem item, long expiresAt) {

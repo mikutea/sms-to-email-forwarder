@@ -1,8 +1,12 @@
 package com.server.smsforwarder;
 
 import android.annotation.SuppressLint;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 
 import androidx.work.BackoffPolicy;
 import androidx.work.Constraints;
@@ -20,6 +24,10 @@ import java.util.concurrent.TimeUnit;
 
 final class ForwardScheduler {
     private static final long MIN_BACKOFF_MS = 30_000L;
+    private static final long ENQUEUE_RECOVERY_DELAY_MS = 60_000L;
+    private static final int ENQUEUE_RECOVERY_REQUEST_CODE = 0x594a;
+    static final String ACTION_RECONCILE_QUEUE =
+            "com.server.smsforwarder.action.RECONCILE_QUEUE";
     private static final String WORK_NAME = "sms_forwarding_queue";
     static final String URGENT_WORK_NAME = "sms_forwarding_queue_urgent";
     static final String RETRY_WAKEUP_WORK_NAME = "sms_forwarding_queue_urgent_retry_wakeup";
@@ -125,16 +133,20 @@ final class ForwardScheduler {
             operation.getResult().addListener(() -> {
                 try {
                     operation.getResult().get();
+                    cancelEnqueueRecovery(applicationContext);
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     acknowledgeUrgentWork(applicationContext, reservationToken);
+                    scheduleEnqueueRecovery(applicationContext);
                 } catch (ExecutionException | RuntimeException error) {
                     // Only this request's token is cleared. A newer reservation remains intact.
                     acknowledgeUrgentWork(applicationContext, reservationToken);
+                    scheduleEnqueueRecovery(applicationContext);
                 }
             }, Runnable::run);
         } catch (RuntimeException error) {
             acknowledgeUrgentWork(applicationContext, reservationToken);
+            scheduleEnqueueRecovery(applicationContext);
             throw error;
         }
     }
@@ -177,6 +189,50 @@ final class ForwardScheduler {
     static String urgentReservationToken(Data inputData) {
         String token = inputData.getString(KEY_URGENT_RESERVATION_TOKEN);
         return token == null ? "" : token;
+    }
+
+    static void reconcileFailedEnqueue(Context context) {
+        AppConfig config = AppConfig.load(context);
+        QueueDatabase database = QueueDatabase.get(context);
+        if (!config.enabled || database.count() == 0) {
+            return;
+        }
+        if (database.hasReady(System.currentTimeMillis())) {
+            schedule(context);
+        } else {
+            scheduleUrgentRetryFromQueue(context);
+        }
+    }
+
+    static void scheduleEnqueueRecovery(Context context) {
+        try {
+            AlarmManager alarmManager =
+                    (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (alarmManager == null) {
+                return;
+            }
+            alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + ENQUEUE_RECOVERY_DELAY_MS,
+                    enqueueRecoveryIntent(context, PendingIntent.FLAG_UPDATE_CURRENT));
+        } catch (RuntimeException error) {
+            AppConfig.setStatus(
+                    context,
+                    "后台调度恢复失败，将在下次启动或新短信到达时继续："
+                            + ForwardProcessor.safeMessage(error));
+        }
+    }
+
+    static void cancelEnqueueRecovery(Context context) {
+        PendingIntent pending = enqueueRecoveryIntent(context, PendingIntent.FLAG_NO_CREATE);
+        if (pending == null) {
+            return;
+        }
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager != null) {
+            alarmManager.cancel(pending);
+        }
+        pending.cancel();
     }
 
     @SuppressLint("ApplySharedPref")
@@ -226,5 +282,14 @@ final class ForwardScheduler {
 
     private static SharedPreferences schedulerPreferences(Context context) {
         return context.getSharedPreferences(SCHEDULER_PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static PendingIntent enqueueRecoveryIntent(Context context, int flags) {
+        Intent intent = new Intent(context, BootReceiver.class).setAction(ACTION_RECONCILE_QUEUE);
+        return PendingIntent.getBroadcast(
+                context,
+                ENQUEUE_RECOVERY_REQUEST_CODE,
+                intent,
+                flags | PendingIntent.FLAG_IMMUTABLE);
     }
 }

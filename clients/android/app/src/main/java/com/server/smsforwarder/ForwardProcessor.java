@@ -12,7 +12,7 @@ final class ForwardProcessor {
     private ForwardProcessor() {
     }
 
-    static ProcessResult processReady(Context context, int limit) {
+    static ProcessResult processReady(Context context, int limit, boolean prioritizeSms) {
         AppConfig config = AppConfig.load(context);
         if (!config.enabled) {
             // Keep queued data intact, but do not create an immediate WorkManager loop
@@ -27,7 +27,8 @@ final class ForwardProcessor {
         }
 
         QueueDatabase database = QueueDatabase.get(context);
-        List<QueueItem> ready = database.claimReady(System.currentTimeMillis(), limit);
+        List<QueueItem> ready = database.claimReady(
+                System.currentTimeMillis(), limit, prioritizeSms);
         int processed = 0;
         for (QueueItem item : ready) {
             try {

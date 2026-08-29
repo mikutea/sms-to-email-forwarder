@@ -146,6 +146,17 @@ final class SmsReadFeature {
                 && item.readLinkGeneration == currentGeneration(context);
     }
 
+    @android.annotation.SuppressLint("ApplySharedPref")
+    static void invalidateReadLinkGeneration(Context context) {
+        synchronized (OPERATION_LOCK) {
+            SharedPreferences preferences = prefs(context);
+            long generation = preferences.getLong(KEY_GENERATION, 1L);
+            preferences.edit()
+                    .putLong(KEY_GENERATION, generation == Long.MAX_VALUE ? 1L : generation + 1L)
+                    .commit();
+        }
+    }
+
     static boolean canDispatchReadAction(
             boolean featureEnabled, boolean notificationAccess, boolean receiptPresent) {
         return featureEnabled && notificationAccess && receiptPresent;

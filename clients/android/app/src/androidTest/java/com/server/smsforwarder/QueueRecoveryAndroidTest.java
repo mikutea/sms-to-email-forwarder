@@ -34,6 +34,7 @@ public final class QueueRecoveryAndroidTest {
         database.clearHistory();
         SmsReadFeature.setEnabled(context, false);
         ForwardScheduler.clearUrgentWorkReservation(context);
+        ForwardScheduler.cancelEnqueueRecovery(context);
     }
 
     @After
@@ -48,6 +49,7 @@ public final class QueueRecoveryAndroidTest {
                 .getResult()
                 .get(5L, TimeUnit.SECONDS);
         ForwardScheduler.clearUrgentWorkReservation(context);
+        ForwardScheduler.cancelEnqueueRecovery(context);
         database.clear();
         database.clearHistory();
     }
@@ -268,6 +270,53 @@ public final class QueueRecoveryAndroidTest {
         assertFalse(secondReservation.isEmpty());
         assertFalse(firstReservation.equals(secondReservation));
         ForwardScheduler.clearUrgentWorkReservation(context);
+    }
+
+    @Test
+    public void urgentLaneClaimsSmsBeforeOlderStatusRows() {
+        long now = System.currentTimeMillis();
+        assertTrue(database.enqueueStatus(QueueItem.KIND_HEARTBEAT, "旧心跳", "旧状态"));
+        assertTrue(database.enqueueStatus(QueueItem.KIND_ALERT, "旧提醒", "旧状态"));
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10013", "虚构的紧急短信优先级测试", now + 2L, 0));
+
+        QueueItem claimed = database.claimReady(now + 1_000L, 1, true).get(0);
+
+        assertEquals(QueueItem.KIND_SMS, claimed.kind);
+    }
+
+    @Test
+    public void clearingQueueInvalidatesAnAlreadyClaimedReadLinkGeneration() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        SmsReadFeature.setEnabled(context, true);
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                SmsReadFeature.enqueueIncomingSms(
+                        context,
+                        database,
+                        "10014",
+                        "隐私模式转换后的正文",
+                        "虚构的清空队列在途线索测试",
+                        now,
+                        now,
+                        0));
+        QueueItem claimed = database.claimReady(now + 1_000L, 1).get(0);
+        assertTrue(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
+
+        database.clear();
+
+        assertFalse(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
+        assertEquals(0, database.count());
+    }
+
+    @Test
+    public void failedEnqueueRecoveryUsesAPrivateExplicitAlarm() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+
+        ForwardScheduler.scheduleEnqueueRecovery(context);
+        ForwardScheduler.cancelEnqueueRecovery(context);
     }
 
     @Test

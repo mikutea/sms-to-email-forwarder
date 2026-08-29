@@ -10,10 +10,12 @@ import androidx.work.Data;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
+import androidx.work.Operation;
 import androidx.work.OutOfQuotaPolicy;
 import androidx.work.WorkManager;
 
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 final class ForwardScheduler {
@@ -116,10 +118,21 @@ final class ForwardScheduler {
             return;
         }
         try {
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
                     URGENT_WORK_NAME,
                     ExistingWorkPolicy.APPEND_OR_REPLACE,
                     buildRequest(0L, true, reservationToken));
+            operation.getResult().addListener(() -> {
+                try {
+                    operation.getResult().get();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    acknowledgeUrgentWork(applicationContext, reservationToken);
+                } catch (ExecutionException | RuntimeException error) {
+                    // Only this request's token is cleared. A newer reservation remains intact.
+                    acknowledgeUrgentWork(applicationContext, reservationToken);
+                }
+            }, Runnable::run);
         } catch (RuntimeException error) {
             acknowledgeUrgentWork(applicationContext, reservationToken);
             throw error;

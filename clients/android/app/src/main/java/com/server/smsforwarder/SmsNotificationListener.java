@@ -304,8 +304,9 @@ public final class SmsNotificationListener extends NotificationListenerService {
         StringBuilder result = new StringBuilder();
         append(result, extras.getCharSequence(Notification.EXTRA_TITLE));
         append(result, extras.getCharSequence(Notification.EXTRA_TEXT));
-        append(result, extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
-        append(result, extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+        // Expanded, line-list, subtext, and historic payloads can describe older messages in the
+        // same conversation. A long-window exception may use only the current summary plus the
+        // newest MessagingStyle entry.
         appendLatestMessage(result, extras.getParcelableArray(EXTRA_MESSAGES_COMPAT));
         return result.toString();
     }

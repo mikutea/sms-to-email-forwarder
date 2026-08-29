@@ -26,12 +26,23 @@ public final class ReadReceiptCleanupWorker extends Worker {
     @Override
     public Result doWork() {
         Context context = getApplicationContext();
+        boolean disabledCleanup = needsDisabledCleanup(
+                SmsReadFeature.isEnabled(context),
+                SmsReadFeature.hasNotificationAccess(context));
         try {
+            if (disabledCleanup) {
+                SmsReadFeature.reconcileDisabledLinkageData(context);
+                return Result.success();
+            }
             QueueDatabase database = QueueDatabase.get(context);
             database.expireReadReceipts(System.currentTimeMillis());
             schedule(context, ExistingWorkPolicy.APPEND_OR_REPLACE);
             return Result.success();
         } catch (RuntimeException error) {
+            if (disabledCleanup) {
+                // Do not downgrade a failed full privacy cleanup to receipt-only cleanup.
+                return Result.retry();
+            }
             try {
                 // Prefer privacy over the optional read action. If the transient database error
                 // has cleared, remove every matching clue now instead of retaining it past TTL.
@@ -49,7 +60,40 @@ public final class ReadReceiptCleanupWorker extends Worker {
     }
 
     static void reconcile(Context context) {
+        if (needsDisabledCleanup(
+                SmsReadFeature.isEnabled(context), SmsReadFeature.hasNotificationAccess(context))) {
+            schedulePrivacyCleanup(context);
+            return;
+        }
         schedule(context, ExistingWorkPolicy.KEEP);
+    }
+
+    static void schedulePrivacyCleanup(Context context) {
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(
+                ReadReceiptCleanupWorker.class).build();
+        Context applicationContext = context.getApplicationContext();
+        try {
+            Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.REPLACE,
+                    request);
+            operation.getResult().addListener(() -> {
+                try {
+                    operation.getResult().get();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    attemptDisabledCleanup(applicationContext);
+                } catch (ExecutionException | RuntimeException error) {
+                    attemptDisabledCleanup(applicationContext);
+                }
+            }, Runnable::run);
+        } catch (RuntimeException error) {
+            attemptDisabledCleanup(applicationContext);
+        }
+    }
+
+    static boolean needsDisabledCleanup(boolean featureEnabled, boolean accessGranted) {
+        return !featureEnabled || !accessGranted;
     }
 
     private static void schedule(Context context, ExistingWorkPolicy policy) {
@@ -88,6 +132,16 @@ public final class ReadReceiptCleanupWorker extends Worker {
             QueueDatabase.get(context).cancelReadReceipts(
                     "SMTP 服务器已接受邮件 · 系统短信未标记已读"
                             + "（清理任务调度失败，已清除临时匹配线索）");
+        }
+    }
+
+    private static void attemptDisabledCleanup(Context context) {
+        try {
+            SmsReadFeature.reconcileDisabledLinkageData(context);
+        } catch (RuntimeException ignored) {
+            // A later app start, package replacement, or boot calls reconcile() again. If the
+            // WorkManager database itself is unavailable there is no second durable scheduler to
+            // rely on here, so keep this callback non-crashing and preserve the fail-closed pref.
         }
     }
 }

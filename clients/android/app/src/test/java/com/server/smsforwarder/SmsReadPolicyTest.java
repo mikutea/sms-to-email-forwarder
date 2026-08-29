@@ -21,6 +21,20 @@ public final class SmsReadPolicyTest {
     }
 
     @Test
+    public void readCluesRequireBothOptInAndLiveSystemAccess() {
+        assertTrue(SmsReadFeature.canRetainReadMatchClue(true, true));
+        assertFalse(SmsReadFeature.canRetainReadMatchClue(true, false));
+        assertFalse(SmsReadFeature.canRetainReadMatchClue(false, true));
+    }
+
+    @Test
+    public void disabledOrRevokedReadLinkRequiresPrivacyCleanup() {
+        assertFalse(ReadReceiptCleanupWorker.needsDisabledCleanup(true, true));
+        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(true, false));
+        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(false, true));
+    }
+
+    @Test
     public void onlyARealLocalSmsReceiptIsEligibleForReadLinkage() {
         QueueItem realReceipt = new QueueItem(
                 "real", QueueItem.KIND_SMS, 100L, "10000", "示例", 0, 0, 0, "示例线索", 200L);

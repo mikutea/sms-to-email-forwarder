@@ -475,6 +475,28 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void disabledReadLinkReconciliationClearsQueuedMatchingClues() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        SmsReadFeature.setEnabled(context, false);
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms(
+                        "10017",
+                        "虚构的撤销授权清理测试",
+                        "虚构线索",
+                        now,
+                        now,
+                        0,
+                        9L));
+
+        SmsReadFeature.reconcileDisabledLinkageData(context);
+
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        assertTrue(item.bodyMatchClue.isEmpty());
+        assertEquals(0L, item.readLinkGeneration);
+    }
+
+    @Test
     public void notificationListenerIsPrivateAndSystemPermissionProtected() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ComponentName component = SmsReadFeature.listenerComponent(context);

@@ -34,12 +34,33 @@ final class SmsReadFeature {
                     .putLong(KEY_GENERATION, generation)
                     .commit();
             if (!enabled) {
-                SmsNotificationListener.onFeatureDisabled();
-                QueueDatabase database = QueueDatabase.get(context);
-                database.cancelReadReceipts(
-                        "SMTP 服务器已接受邮件 · 已读联动已关闭");
-                database.clearPendingReadMatchClues();
+                clearDisabledLinkageData(context);
             }
+        }
+    }
+
+    static void disableAndScheduleCleanup(Context context) {
+        try {
+            setEnabled(context, false);
+        } catch (RuntimeException error) {
+            // The preference commit happens before database cleanup. Preserve a durable retry for
+            // receipts and queued clues if the local database is transiently unavailable.
+            ReadReceiptCleanupWorker.schedulePrivacyCleanup(context);
+        }
+    }
+
+    static void reconcileDisabledLinkageData(Context context) {
+        synchronized (OPERATION_LOCK) {
+            if (isEnabled(context) && hasNotificationAccess(context)) {
+                return;
+            }
+            if (isEnabled(context)) {
+                // Notification access may be revoked while the activity is stopped. Persist the
+                // opt-out again on every durable retry before touching the local clues.
+                setEnabled(context, false);
+                return;
+            }
+            clearDisabledLinkageData(context);
         }
     }
 
@@ -62,7 +83,9 @@ final class SmsReadFeature {
             long localReceivedAt,
             int simSlot) {
         synchronized (OPERATION_LOCK) {
-            String clue = isEnabled(context)
+            boolean readLinkAvailable = canRetainReadMatchClue(
+                    isEnabled(context), hasNotificationAccess(context));
+            String clue = readLinkAvailable
                     ? SmsNotificationMatcher.bodyMatchClue(originalBody) : "";
             return database.enqueueSms(
                     sender,
@@ -71,7 +94,7 @@ final class SmsReadFeature {
                     receivedAt,
                     localReceivedAt,
                     simSlot,
-                    isEnabled(context) ? currentGeneration(context) : 0L);
+                    readLinkAvailable ? currentGeneration(context) : 0L);
         }
     }
 
@@ -162,12 +185,24 @@ final class SmsReadFeature {
         return featureEnabled && notificationAccess && receiptPresent;
     }
 
+    static boolean canRetainReadMatchClue(boolean featureEnabled, boolean notificationAccess) {
+        return featureEnabled && notificationAccess;
+    }
+
     static Object operationLock() {
         return OPERATION_LOCK;
     }
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static void clearDisabledLinkageData(Context context) {
+        SmsNotificationListener.onFeatureDisabled();
+        QueueDatabase database = QueueDatabase.get(context);
+        database.cancelReadReceipts(
+                "SMTP 服务器已接受邮件 · 已读联动已关闭");
+        database.clearPendingReadMatchClues();
     }
 
     private static long currentGeneration(Context context) {

@@ -235,7 +235,7 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (SmsReadFeature.isEnabled(this) && !SmsReadFeature.hasNotificationAccess(this)) {
-            SmsReadFeature.setEnabled(this, false);
+            SmsReadFeature.disableAndScheduleCleanup(this);
         }
         if (firstResume) {
             firstResume = false;
@@ -260,7 +260,7 @@ public final class MainActivity extends Activity {
                 SmsNotificationListener.requestProcessing(this);
                 showToast("已开启：转发成功后尝试标记系统短信已读");
             } else {
-                SmsReadFeature.setEnabled(this, false);
+                SmsReadFeature.disableAndScheduleCleanup(this);
                 showGlassDialog(
                         "通知使用权尚未开启",
                         "雁笺没有获得通知使用权，因此不会读取通知，也不会尝试标记短信已读。你可以稍后重新开启。",
@@ -1480,7 +1480,7 @@ public final class MainActivity extends Activity {
                     requestNotificationAccess();
                 }
             } else {
-                SmsReadFeature.setEnabled(this, false);
+                SmsReadFeature.disableAndScheduleCleanup(this);
                 showToast("自动已读联动已关闭");
             }
         });

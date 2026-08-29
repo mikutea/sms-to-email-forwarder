@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 
 import androidx.core.app.NotificationManagerCompat;
 
+// Privacy state must be committed synchronously before local clue cleanup or re-enablement.
+@android.annotation.SuppressLint("ApplySharedPref")
 final class SmsReadFeature {
     private static final String PREFS = "sms_read_feature";
     private static final String KEY_ENABLED = "enabled";

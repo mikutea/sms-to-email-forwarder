@@ -328,16 +328,21 @@ final class QueueDatabase extends SQLiteOpenHelper {
         getWritableDatabase().delete("message_history", null, null);
     }
 
-    synchronized boolean requeue(HistoryItem item) {
-        return insert(
-                item.id,
-                QueueItem.KIND_SMS,
-                item.sender,
-                item.body,
-                "",
-                item.receivedAt,
-                0L,
-                item.simSlot) == EnqueueResult.INSERTED;
+    boolean requeue(HistoryItem item) {
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                removeReadReceipt(item.id);
+                return insert(
+                        item.id,
+                        QueueItem.KIND_SMS,
+                        item.sender,
+                        item.body,
+                        "",
+                        item.receivedAt,
+                        0L,
+                        item.simSlot) == EnqueueResult.INSERTED;
+            }
+        }
     }
 
     synchronized void remove(String id) {
@@ -519,6 +524,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 "pending_read_receipts", "id = ?", new String[]{id});
     }
 
+    synchronized boolean hasReadReceipt(String id) {
+        try (Cursor cursor = getReadableDatabase().query(
+                "pending_read_receipts",
+                new String[]{"id"},
+                "id = ?",
+                new String[]{id},
+                null, null, null, "1")) {
+            return cursor.moveToFirst();
+        }
+    }
+
     synchronized void cancelReadReceipts(String detail) {
         List<String> ids = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().query(
@@ -601,7 +617,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 null);
         getWritableDatabase().delete(
                 "message_history",
-                "updated_at < ?",
+                "updated_at < ? "
+                        + "AND id NOT IN (SELECT id FROM pending_messages) "
+                        + "AND id NOT IN (SELECT id FROM pending_read_receipts)",
                 new String[]{Long.toString(System.currentTimeMillis() - 90L * 24L * 60L * 60L * 1000L)});
     }
 

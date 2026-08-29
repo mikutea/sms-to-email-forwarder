@@ -86,15 +86,12 @@ final class ForwardProcessor {
     private static void startReadLinkBestEffort(
             Context context, QueueDatabase database, QueueItem item) {
         try {
-            String detail = SmsReadFeature.onForwardSuccess(context, database, item);
-            database.updateReadReceiptOutcome(item.id, detail);
+            SmsReadFeature.onForwardSuccess(context, database, item);
         } catch (RuntimeException ignored) {
             // Delivery is final. Read linkage is optional and must never requeue an email that
             // the SMTP server already accepted. The base success detail remains authoritative.
             try {
-                database.updateReadReceiptOutcome(
-                        item.id,
-                        "SMTP 服务器已接受邮件 · 已读联动暂未启动（本机服务暂时不可用）");
+                SmsReadFeature.recordReadLinkUnavailable(context, database, item.id);
             } catch (RuntimeException databaseUnavailable) {
                 // There is no safe local recovery action here; importantly, do not retry SMTP.
             }

@@ -164,11 +164,14 @@ public final class SmsNotificationListener extends NotificationListenerService {
                 continue;
             }
             try {
-                candidate.action.actionIntent.send();
-                database.removeReadReceipt(request.id);
-                database.updateReadReceiptOutcome(
+                boolean dispatched = SmsReadFeature.dispatchReadActionIfAllowed(
+                        this,
+                        database,
                         request.id,
-                        "SMTP 服务器已接受邮件 · 已请求默认短信应用标记已读（结果由短信应用处理）");
+                        candidate.action.actionIntent);
+                if (!dispatched) {
+                    continue;
+                }
             } catch (PendingIntent.CanceledException | RuntimeException error) {
                 database.removeReadReceipt(request.id);
                 database.updateReadReceiptOutcome(

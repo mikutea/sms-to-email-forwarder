@@ -124,12 +124,44 @@ public final class QueueRecoveryAndroidTest {
         HistoryItem history = new HistoryItem(
                 "manual-resend", receivedAt, "10008", "虚构的手动重发正文", 0,
                 "SUCCESS", 0, "SMTP 服务器已接受邮件");
+        database.enqueueReadReceipt(
+                new QueueItem(
+                        history.id, QueueItem.KIND_SMS, receivedAt,
+                        history.sender, history.body, history.simSlot, 0, 0,
+                        SmsNotificationMatcher.bodyMatchClue("虚构的旧投递匹配线索"),
+                        System.currentTimeMillis()),
+                System.currentTimeMillis() + 60_000L);
+        assertEquals(1, database.readReceiptRequests(System.currentTimeMillis()).size());
 
         assertTrue(database.requeue(history));
 
+        assertTrue(database.readReceiptRequests(System.currentTimeMillis()).isEmpty());
         QueueItem item = database.claimReady(System.currentTimeMillis() + 1_000L, 1).get(0);
         assertEquals(0L, item.localReceivedAt);
         assertFalse(SmsReadFeature.isEligibleForReadLink(item));
+    }
+
+    @Test
+    public void agePruningKeepsHistoryForAStillPendingMessage() {
+        long now = System.currentTimeMillis();
+        String sender = "10009";
+        String body = "虚构的长期待发历史保留测试";
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms(sender, body, now, 0));
+        String id = QueueDatabase.stableSmsId(sender, body, now, 0);
+        ContentValues old = new ContentValues();
+        old.put("updated_at", now - 100L * 24L * 60L * 60L * 1000L);
+        database.getWritableDatabase().update(
+                "message_history", old, "id = ?", new String[]{id});
+
+        database.recordFiltered(
+                "newer-filtered-record", now, "10010", "虚构的新记录", 0, "测试过滤");
+
+        try (android.database.Cursor cursor = database.getReadableDatabase().query(
+                "message_history", new String[]{"id"}, "id = ?", new String[]{id},
+                null, null, null, "1")) {
+            assertTrue(cursor.moveToFirst());
+        }
     }
 
     @Test

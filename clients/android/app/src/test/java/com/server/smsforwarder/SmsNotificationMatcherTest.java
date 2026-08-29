@@ -73,6 +73,22 @@ public final class SmsNotificationMatcherTest {
     }
 
     @Test
+    public void historicBodyTextCannotAuthorizeALongWindowAction() {
+        long receivedAt = 1_000_000L;
+        String clue = "您的旅行验证码123456";
+
+        int score = SmsNotificationMatcher.score(
+                receivedAt,
+                "10690001",
+                clue,
+                receivedAt + 24L * 60L * 60L * 1000L,
+                "10690001 新消息 您的旅行验证码123456",
+                "10690001 新消息");
+
+        assertEquals(-1, score);
+    }
+
+    @Test
     public void originalBodyClueIsBoundedBeforePrivacyTransformation() {
         String original = "【示例服务】您的业务已经办理成功，请留意后续通知";
 

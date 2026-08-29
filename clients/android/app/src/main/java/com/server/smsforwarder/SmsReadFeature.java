@@ -10,6 +10,7 @@ import androidx.core.app.NotificationManagerCompat;
 final class SmsReadFeature {
     private static final String PREFS = "sms_read_feature";
     private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_GENERATION = "generation";
     private static final long REQUEST_TTL_MS = 10L * 60L * 1000L;
     private static final Object OPERATION_LOCK = new Object();
 
@@ -22,7 +23,16 @@ final class SmsReadFeature {
 
     static void setEnabled(Context context, boolean enabled) {
         synchronized (OPERATION_LOCK) {
-            prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit();
+            SharedPreferences preferences = prefs(context);
+            boolean wasEnabled = preferences.getBoolean(KEY_ENABLED, false);
+            long generation = preferences.getLong(KEY_GENERATION, 1L);
+            if (!enabled && wasEnabled) {
+                generation = generation == Long.MAX_VALUE ? 1L : generation + 1L;
+            }
+            preferences.edit()
+                    .putBoolean(KEY_ENABLED, enabled)
+                    .putLong(KEY_GENERATION, generation)
+                    .commit();
             if (!enabled) {
                 SmsNotificationListener.onFeatureDisabled();
                 QueueDatabase database = QueueDatabase.get(context);
@@ -60,7 +70,8 @@ final class SmsReadFeature {
                     clue,
                     receivedAt,
                     localReceivedAt,
-                    simSlot);
+                    simSlot,
+                    isEnabled(context) ? currentGeneration(context) : 0L);
         }
     }
 
@@ -71,6 +82,8 @@ final class SmsReadFeature {
             if (QueueItem.KIND_SMS.equals(item.kind) && isEnabled(context)) {
                 if (!isEligibleForReadLink(item)) {
                     detail = "SMTP 服务器已接受邮件 · 手动重新转发不执行系统短信已读联动";
+                } else if (!hasCurrentReadLinkGeneration(context, item)) {
+                    detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（发送期间曾关闭已读联动）";
                 } else if (!hasNotificationAccess(context)) {
                     detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（通知使用权未授权）";
                 } else {
@@ -125,11 +138,20 @@ final class SmsReadFeature {
         return QueueItem.KIND_SMS.equals(item.kind) && item.localReceivedAt > 0L;
     }
 
+    static boolean hasCurrentReadLinkGeneration(Context context, QueueItem item) {
+        return item.readLinkGeneration > 0L
+                && item.readLinkGeneration == currentGeneration(context);
+    }
+
     static Object operationLock() {
         return OPERATION_LOCK;
     }
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static long currentGeneration(Context context) {
+        return prefs(context).getLong(KEY_GENERATION, 1L);
     }
 }

@@ -13,7 +13,7 @@ import java.util.UUID;
 
 final class QueueDatabase extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "forward_queue.db";
-    private static final int DATABASE_VERSION = 6;
+    private static final int DATABASE_VERSION = 7;
     private static final long CLAIM_LEASE_MS = 5L * 60L * 1000L;
     private static final int MAX_SMS_ROWS = 500;
     private static final int MAX_NON_SMS_ROWS = 50;
@@ -58,6 +58,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + "next_attempt_at INTEGER NOT NULL,"
                 + "lease_until INTEGER NOT NULL DEFAULT 0,"
                 + "delivered_mask INTEGER NOT NULL DEFAULT 0,"
+                + "read_link_generation INTEGER NOT NULL DEFAULT 0,"
                 + "created_at INTEGER NOT NULL"
                 + ")");
         db.execSQL("CREATE INDEX pending_messages_next_idx "
@@ -91,6 +92,11 @@ final class QueueDatabase extends SQLiteOpenHelper {
             }
             coalescePendingHeartbeats(db);
         }
+        if (oldVersion < 7) {
+            db.execSQL(
+                    "ALTER TABLE pending_messages "
+                            + "ADD COLUMN read_link_generation INTEGER NOT NULL DEFAULT 0");
+        }
     }
 
     @Override
@@ -102,7 +108,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     synchronized EnqueueResult enqueueSms(String sender, String body, long receivedAt, int simSlot) {
-        return enqueueSms(sender, body, "", receivedAt, System.currentTimeMillis(), simSlot);
+        return enqueueSms(sender, body, "", receivedAt, System.currentTimeMillis(), simSlot, 0L);
     }
 
     synchronized EnqueueResult enqueueSms(
@@ -112,7 +118,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             long receivedAt,
             int simSlot) {
         return enqueueSms(
-                sender, body, bodyMatchClue, receivedAt, System.currentTimeMillis(), simSlot);
+                sender, body, bodyMatchClue, receivedAt, System.currentTimeMillis(), simSlot, 0L);
     }
 
     synchronized EnqueueResult enqueueSms(
@@ -122,10 +128,22 @@ final class QueueDatabase extends SQLiteOpenHelper {
             long receivedAt,
             long localReceivedAt,
             int simSlot) {
+        return enqueueSms(
+                sender, body, bodyMatchClue, receivedAt, localReceivedAt, simSlot, 0L);
+    }
+
+    synchronized EnqueueResult enqueueSms(
+            String sender,
+            String body,
+            String bodyMatchClue,
+            long receivedAt,
+            long localReceivedAt,
+            int simSlot,
+            long readLinkGeneration) {
         String id = stableSmsId(sender, body, receivedAt, simSlot);
         return insert(
                 id, QueueItem.KIND_SMS, sender, body, bodyMatchClue,
-                receivedAt, localReceivedAt, simSlot);
+                receivedAt, localReceivedAt, simSlot, readLinkGeneration);
     }
 
     synchronized boolean enqueueTest() {
@@ -138,7 +156,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 "",
                 now,
                 now,
-                -1) == EnqueueResult.INSERTED;
+                -1,
+                0L) == EnqueueResult.INSERTED;
     }
 
     synchronized boolean enqueueStatus(String kind, String title, String body) {
@@ -146,7 +165,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
         if (QueueItem.KIND_HEARTBEAT.equals(kind) && hasPendingKind(getReadableDatabase(), kind)) {
             return refreshPendingHeartbeat(title, body, now);
         }
-        return insert(UUID.randomUUID().toString(), kind, title, body, "", now, now, -1)
+        return insert(UUID.randomUUID().toString(), kind, title, body, "", now, now, -1, 0L)
                 == EnqueueResult.INSERTED;
     }
 
@@ -220,7 +239,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
             String bodyMatchClue,
             long receivedAt,
             long localReceivedAt,
-            int simSlot) {
+            int simSlot,
+            long readLinkGeneration) {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
@@ -255,6 +275,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             values.put("next_attempt_at", System.currentTimeMillis());
             values.put("lease_until", 0L);
             values.put("delivered_mask", 0);
+            values.put("read_link_generation", readLinkGeneration);
             values.put("created_at", localReceivedAt);
             boolean inserted = database.insertWithOnConflict(
                     "pending_messages",
@@ -277,7 +298,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
         database.beginTransaction();
         try (Cursor cursor = database.query(
                 "pending_messages",
-                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted", "created_at"},
+                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted", "created_at", "read_link_generation"},
                 "next_attempt_at <= ? AND lease_until <= ?",
                 new String[]{Long.toString(now), Long.toString(now)},
                 null,
@@ -307,7 +328,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
                         cursor.getInt(6),
                         cursor.getInt(7),
                         CryptoStore.decrypt(cursor.getString(8)),
-                        cursor.getLong(9)));
+                        cursor.getLong(9),
+                        cursor.getLong(10)));
             }
             database.setTransactionSuccessful();
         } finally {
@@ -406,7 +428,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
                         "",
                         item.receivedAt,
                         0L,
-                        item.simSlot) == EnqueueResult.INSERTED;
+                        item.simSlot,
+                        0L) == EnqueueResult.INSERTED;
             }
         }
     }
@@ -619,10 +642,11 @@ final class QueueDatabase extends SQLiteOpenHelper {
     synchronized int clearPendingReadMatchClues() {
         ContentValues values = new ContentValues();
         values.put("match_clue_encrypted", "");
+        values.put("read_link_generation", 0L);
         return getWritableDatabase().update(
                 "pending_messages",
                 values,
-                "kind = ? AND match_clue_encrypted <> ''",
+                "kind = ? AND (match_clue_encrypted <> '' OR read_link_generation <> 0)",
                 new String[]{QueueItem.KIND_SMS});
     }
 

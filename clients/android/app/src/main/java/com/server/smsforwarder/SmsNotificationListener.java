@@ -71,7 +71,7 @@ public final class SmsNotificationListener extends NotificationListenerService {
         if (connectedInstance == this) {
             connectedInstance = null;
         }
-        handler.removeCallbacks(scheduledProcessing);
+        cancelScheduledProcessing();
         executor.shutdownNow();
         super.onDestroy();
     }
@@ -96,7 +96,7 @@ public final class SmsNotificationListener extends NotificationListenerService {
         if (instance == null) {
             return;
         }
-        instance.handler.removeCallbacks(instance.scheduledProcessing);
+        instance.cancelScheduledProcessing();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             connectedInstance = null;
             instance.requestUnbind();
@@ -231,7 +231,8 @@ public final class SmsNotificationListener extends NotificationListenerService {
                     request.sender,
                     request.bodyMatchClue,
                     status.getPostTime(),
-                    searchableText(notification));
+                    searchableText(notification),
+                    currentEventText(notification));
             if (score >= 0) {
                 candidates.add(new Candidate(
                         markReadAction(notification), score, status.getPostTime()));
@@ -289,6 +290,40 @@ public final class SmsNotificationListener extends NotificationListenerService {
         appendMessages(result, extras.getParcelableArray(Notification.EXTRA_MESSAGES));
         appendMessages(result, extras.getParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES));
         return result.toString();
+    }
+
+    private static String currentEventText(Notification notification) {
+        Bundle extras = notification.extras;
+        if (extras == null) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder();
+        append(result, extras.getCharSequence(Notification.EXTRA_TITLE));
+        append(result, extras.getCharSequence(Notification.EXTRA_TEXT));
+        append(result, extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+        append(result, extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+        appendLatestMessage(result, extras.getParcelableArray(Notification.EXTRA_MESSAGES));
+        return result.toString();
+    }
+
+    private static void appendLatestMessage(StringBuilder result, Parcelable[] messages) {
+        if (messages == null) {
+            return;
+        }
+        for (int i = messages.length - 1; i >= 0; i--) {
+            if (!(messages[i] instanceof Bundle)) {
+                continue;
+            }
+            Bundle message = (Bundle) messages[i];
+            append(result, message.getCharSequence("sender"));
+            append(result, message.getCharSequence("text"));
+            return;
+        }
+    }
+
+    private void cancelScheduledProcessing() {
+        handler.removeCallbacks(scheduledProcessing);
+        scheduledAt = 0L;
     }
 
     private static void appendMessages(StringBuilder result, Parcelable[] messages) {

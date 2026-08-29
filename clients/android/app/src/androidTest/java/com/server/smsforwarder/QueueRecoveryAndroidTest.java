@@ -144,6 +144,31 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void disablingAndReenablingInvalidatesAnAlreadyClaimedBodyClue() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        SmsReadFeature.setEnabled(context, true);
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                SmsReadFeature.enqueueIncomingSms(
+                        context,
+                        database,
+                        "10012",
+                        "隐私模式转换后的正文",
+                        "虚构的在途原始短信线索用于授权代次测试",
+                        now,
+                        now,
+                        0));
+        QueueItem claimed = database.claimReady(now + 1_000L, 1).get(0);
+        assertTrue(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
+
+        SmsReadFeature.setEnabled(context, false);
+        SmsReadFeature.setEnabled(context, true);
+
+        assertFalse(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
+    }
+
+    @Test
     public void manualHistoryResendCannotMasqueradeAsANewLocalSmsReceipt() {
         long receivedAt = System.currentTimeMillis() - 60L * 60L * 1000L;
         HistoryItem history = new HistoryItem(

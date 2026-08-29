@@ -29,11 +29,28 @@ final class SmsNotificationMatcher {
             String bodyMatchClue,
             long notificationAt,
             String notificationText) {
+        return score(
+                receivedAt,
+                sender,
+                bodyMatchClue,
+                notificationAt,
+                notificationText,
+                notificationText);
+    }
+
+    static int score(
+            long receivedAt,
+            String sender,
+            String bodyMatchClue,
+            long notificationAt,
+            String notificationText,
+            String currentEventText) {
         long delta = notificationAt - receivedAt;
         if (delta < -EARLY_TOLERANCE_MS) {
             return -1;
         }
-        String haystack = normalize(notificationText);
+        String haystack = normalize(
+                delta > LATE_TOLERANCE_MS ? currentEventText : notificationText);
         String normalizedBodyClue = normalize(bodyMatchClue);
         boolean bodyMatches = normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS
                 && haystack.contains(normalizedBodyClue);

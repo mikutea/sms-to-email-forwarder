@@ -205,7 +205,7 @@ final class SmsReadFeature {
         database.clearPendingReadMatchClues();
     }
 
-    private static long currentGeneration(Context context) {
+    static long currentGeneration(Context context) {
         return prefs(context).getLong(KEY_GENERATION, 1L);
     }
 }

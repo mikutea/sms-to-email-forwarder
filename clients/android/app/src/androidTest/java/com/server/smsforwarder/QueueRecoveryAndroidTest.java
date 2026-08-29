@@ -158,15 +158,15 @@ public final class QueueRecoveryAndroidTest {
         SmsReadFeature.setEnabled(context, true);
         assertEquals(
                 QueueDatabase.EnqueueResult.INSERTED,
-                SmsReadFeature.enqueueIncomingSms(
-                        context,
-                        database,
+                database.enqueueSms(
                         "10012",
                         "隐私模式转换后的正文",
-                        "虚构的在途原始短信线索用于授权代次测试",
+                        SmsNotificationMatcher.bodyMatchClue(
+                                "虚构的在途原始短信线索用于授权代次测试"),
                         now,
                         now,
-                        0));
+                        0,
+                        SmsReadFeature.currentGeneration(context)));
         QueueItem claimed = database.claimReady(now + 1_000L, 1).get(0);
         assertTrue(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
 
@@ -293,15 +293,15 @@ public final class QueueRecoveryAndroidTest {
         SmsReadFeature.setEnabled(context, true);
         assertEquals(
                 QueueDatabase.EnqueueResult.INSERTED,
-                SmsReadFeature.enqueueIncomingSms(
-                        context,
-                        database,
+                database.enqueueSms(
                         "10014",
                         "隐私模式转换后的正文",
-                        "虚构的清空队列在途线索测试",
+                        SmsNotificationMatcher.bodyMatchClue(
+                                "虚构的清空队列在途线索测试"),
                         now,
                         now,
-                        0));
+                        0,
+                        SmsReadFeature.currentGeneration(context)));
         QueueItem claimed = database.claimReady(now + 1_000L, 1).get(0);
         assertTrue(SmsReadFeature.hasCurrentReadLinkGeneration(context, claimed));
 

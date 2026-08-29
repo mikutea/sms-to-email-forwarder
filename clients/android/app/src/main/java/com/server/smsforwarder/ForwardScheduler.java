@@ -101,10 +101,30 @@ final class ForwardScheduler {
         if (delay > 0L) {
             builder.setInitialDelay(delay, TimeUnit.MILLISECONDS);
         }
-        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(
-                RETRY_WAKEUP_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                builder.build());
+        Context applicationContext = context.getApplicationContext();
+        try {
+            Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    RETRY_WAKEUP_WORK_NAME,
+                    ExistingWorkPolicy.REPLACE,
+                    builder.build());
+            operation.getResult().addListener(() -> {
+                try {
+                    operation.getResult().get();
+                    cancelEnqueueRecovery(applicationContext);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    scheduleEnqueueRecovery(applicationContext);
+                } catch (ExecutionException | RuntimeException error) {
+                    scheduleEnqueueRecovery(applicationContext);
+                }
+            }, Runnable::run);
+        } catch (RuntimeException error) {
+            scheduleEnqueueRecovery(applicationContext);
+            AppConfig.setStatus(
+                    applicationContext,
+                    "延迟重试调度失败，已安排系统闹钟继续恢复："
+                            + ForwardProcessor.safeMessage(error));
+        }
     }
 
     private static void scheduleNormalFromQueue(

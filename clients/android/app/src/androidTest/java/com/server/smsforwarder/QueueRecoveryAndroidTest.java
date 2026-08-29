@@ -20,6 +20,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public final class QueueRecoveryAndroidTest {
@@ -62,7 +63,7 @@ public final class QueueRecoveryAndroidTest {
     @Test
     public void repeatedHeartbeatIsCoalescedAndStatsStayTyped() {
         assertTrue(database.enqueueStatus(QueueItem.KIND_HEARTBEAT, "心跳一", "状态一"));
-        assertFalse(database.enqueueStatus(QueueItem.KIND_HEARTBEAT, "心跳二", "状态二"));
+        assertTrue(database.enqueueStatus(QueueItem.KIND_HEARTBEAT, "心跳二", "状态二"));
         assertTrue(database.enqueueStatus(QueueItem.KIND_ALERT, "低电量", "状态三"));
         assertEquals(QueueDatabase.EnqueueResult.INSERTED,
                 database.enqueueSms("10010", "测试分类", System.currentTimeMillis(), 0));
@@ -72,6 +73,18 @@ public final class QueueRecoveryAndroidTest {
         assertEquals(1, stats.heartbeat);
         assertEquals(1, stats.alert);
         assertEquals(3, stats.total);
+
+        List<QueueItem> ready = database.claimReady(System.currentTimeMillis() + 1_000L, 3);
+        QueueItem heartbeat = null;
+        for (QueueItem item : ready) {
+            if (QueueItem.KIND_HEARTBEAT.equals(item.kind)) {
+                heartbeat = item;
+                break;
+            }
+        }
+        assertTrue(heartbeat != null);
+        assertEquals("心跳二", heartbeat.sender);
+        assertEquals("状态二", heartbeat.body);
     }
 
     @Test
@@ -262,6 +275,25 @@ public final class QueueRecoveryAndroidTest {
 
         assertFalse(database.readReceiptRequests(now).iterator().hasNext());
         assertTrue(database.recentHistory(5).isEmpty());
+    }
+
+    @Test
+    public void clearingHistoryUsesTheReadLinkOperationLock() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        Thread clearThread = new Thread(() -> {
+            started.countDown();
+            database.clearHistory();
+            finished.countDown();
+        });
+
+        synchronized (SmsReadFeature.operationLock()) {
+            clearThread.start();
+            assertTrue(started.await(2L, TimeUnit.SECONDS));
+            assertFalse(finished.await(200L, TimeUnit.MILLISECONDS));
+        }
+        assertTrue(finished.await(2L, TimeUnit.SECONDS));
+        clearThread.join(2_000L);
     }
 
     @Test

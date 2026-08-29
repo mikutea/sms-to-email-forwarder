@@ -64,6 +64,17 @@ final class ForwardProcessor {
 
     private static void completeAcceptedDelivery(
             Context context, QueueDatabase database, QueueItem item) {
+        if (QueueItem.KIND_SMS.equals(item.kind)) {
+            synchronized (SmsReadFeature.operationLock()) {
+                completeAcceptedDeliveryLocked(context, database, item);
+            }
+            return;
+        }
+        completeAcceptedDeliveryLocked(context, database, item);
+    }
+
+    private static void completeAcceptedDeliveryLocked(
+            Context context, QueueDatabase database, QueueItem item) {
         // Preserve a useful history record when possible, but removal from the SMTP queue is the
         // authoritative delivery transition. A history-only failure must not retain the email.
         try {

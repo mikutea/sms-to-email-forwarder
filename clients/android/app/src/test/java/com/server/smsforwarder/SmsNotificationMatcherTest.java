@@ -50,6 +50,29 @@ public final class SmsNotificationMatcherTest {
     }
 
     @Test
+    public void strongBodyClueMatchesARefreshedNotificationAfterLongQueueDelay() {
+        long receivedAt = 1_000_000L;
+        String clue = "您的旅行验证码123456";
+
+        int refreshed = SmsNotificationMatcher.score(
+                receivedAt,
+                "10690001",
+                clue,
+                receivedAt + 24L * 60L * 60L * 1000L,
+                "10690001 您的旅行验证码123456");
+        int senderOnly = SmsNotificationMatcher.score(
+                receivedAt,
+                "10690001",
+                clue,
+                receivedAt + 24L * 60L * 60L * 1000L,
+                "10690001 另一条会话");
+
+        assertTrue(refreshed >= 8);
+        assertTrue(SmsNotificationMatcher.isConfident(refreshed, -1, 1));
+        assertEquals(-1, senderOnly);
+    }
+
+    @Test
     public void originalBodyClueIsBoundedBeforePrivacyTransformation() {
         String original = "【示例服务】您的业务已经办理成功，请留意后续通知";
 

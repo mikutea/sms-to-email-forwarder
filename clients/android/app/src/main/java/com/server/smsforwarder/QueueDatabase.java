@@ -144,10 +144,72 @@ final class QueueDatabase extends SQLiteOpenHelper {
     synchronized boolean enqueueStatus(String kind, String title, String body) {
         long now = System.currentTimeMillis();
         if (QueueItem.KIND_HEARTBEAT.equals(kind) && hasPendingKind(getReadableDatabase(), kind)) {
-            return false;
+            return refreshPendingHeartbeat(title, body, now);
         }
         return insert(UUID.randomUUID().toString(), kind, title, body, "", now, now, -1)
                 == EnqueueResult.INSERTED;
+    }
+
+    private boolean refreshPendingHeartbeat(String title, String body, long now) {
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try (Cursor cursor = database.query(
+                "pending_messages",
+                new String[]{"id", "sender_encrypted", "body_encrypted", "match_clue_encrypted"},
+                "kind = ? AND lease_until <= ?",
+                new String[]{QueueItem.KIND_HEARTBEAT, Long.toString(now)},
+                null,
+                null,
+                "created_at DESC",
+                "1")) {
+            if (!cursor.moveToFirst()) {
+                return false;
+            }
+
+            String id = cursor.getString(0);
+            long replacedCiphertextChars = cursor.getString(1).length()
+                    + cursor.getString(2).length()
+                    + cursor.getString(3).length();
+            String safeTitle = title == null ? "未知状态" : title;
+            String safeBody = body == null ? "" : body;
+            String encryptedTitle = CryptoStore.encrypt(safeTitle);
+            String encryptedBody = CryptoStore.encrypt(safeBody);
+            String encryptedClue = CryptoStore.encrypt("");
+            long replacementCiphertextChars = encryptedTitle.length()
+                    + encryptedBody.length()
+                    + encryptedClue.length();
+            long[] usage = pendingUsage(database);
+            long retainedCiphertextChars = Math.max(0L, usage[1] - replacedCiphertextChars);
+            if (retainedCiphertextChars
+                    > MAX_PENDING_CIPHERTEXT_CHARS - replacementCiphertextChars) {
+                return false;
+            }
+
+            ContentValues values = new ContentValues();
+            values.put("received_at", now);
+            values.put("sender_encrypted", encryptedTitle);
+            values.put("body_encrypted", encryptedBody);
+            values.put("match_clue_encrypted", encryptedClue);
+            values.put("sim_slot", -1);
+            values.put("attempts", 0);
+            values.put("next_attempt_at", now);
+            values.put("lease_until", 0L);
+            values.put("delivered_mask", 0);
+            values.put("created_at", now);
+            int updated = database.update(
+                    "pending_messages",
+                    values,
+                    "id = ? AND lease_until <= ?",
+                    new String[]{id, Long.toString(now)});
+            if (updated != 1) {
+                return false;
+            }
+            upsertHistory(id, now, safeTitle, safeBody, -1, "QUEUED", 0, "等待发送");
+            database.setTransactionSuccessful();
+            return true;
+        } finally {
+            database.endTransaction();
+        }
     }
 
     private EnqueueResult insert(
@@ -323,9 +385,13 @@ final class QueueDatabase extends SQLiteOpenHelper {
         return items;
     }
 
-    synchronized void clearHistory() {
-        cancelReadReceipts("SMTP 服务器已接受邮件 · 历史与已读联动数据已由用户清除");
-        getWritableDatabase().delete("message_history", null, null);
+    void clearHistory() {
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                cancelReadReceipts("SMTP 服务器已接受邮件 · 历史与已读联动数据已由用户清除");
+                getWritableDatabase().delete("message_history", null, null);
+            }
+        }
     }
 
     boolean requeue(HistoryItem item) {

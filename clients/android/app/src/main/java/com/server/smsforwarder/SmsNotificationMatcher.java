@@ -30,11 +30,20 @@ final class SmsNotificationMatcher {
             long notificationAt,
             String notificationText) {
         long delta = notificationAt - receivedAt;
-        if (delta < -EARLY_TOLERANCE_MS || delta > LATE_TOLERANCE_MS) {
+        if (delta < -EARLY_TOLERANCE_MS) {
             return -1;
         }
         String haystack = normalize(notificationText);
-        int score = Math.abs(delta) <= 90_000L ? 2 : 1;
+        String normalizedBodyClue = normalize(bodyMatchClue);
+        boolean bodyMatches = normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS
+                && haystack.contains(normalizedBodyClue);
+        // Some default SMS apps refresh an existing notification's post time when their group is
+        // updated. After a long offline SMTP delay, accept such an active notification only when
+        // the bounded original-body clue still identifies it; sender or time alone is not enough.
+        if (delta > LATE_TOLERANCE_MS && !bodyMatches) {
+            return -1;
+        }
+        int score = Math.abs(delta) <= 90_000L ? 2 : delta <= LATE_TOLERANCE_MS ? 1 : 0;
         String normalizedSender = normalize(sender);
         if (normalizedSender.length() >= 3 && haystack.contains(normalizedSender)) {
             score += 6;
@@ -44,9 +53,7 @@ final class SmsNotificationMatcher {
                 score += 4;
             }
         }
-        String normalizedBodyClue = normalize(bodyMatchClue);
-        if (normalizedBodyClue.length() >= MIN_BODY_CLUE_CHARS
-                && haystack.contains(normalizedBodyClue)) {
+        if (bodyMatches) {
             score += 8;
         }
         return score;

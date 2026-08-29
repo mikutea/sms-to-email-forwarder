@@ -572,26 +572,38 @@ final class QueueDatabase extends SQLiteOpenHelper {
         trimReadReceipts();
     }
 
-    synchronized List<ReadReceiptRequest> readReceiptRequests(long now) {
-        expireReadReceipts(now);
-        List<ReadReceiptRequest> requests = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                "pending_read_receipts",
-                new String[]{"id", "received_at", "sender_encrypted", "match_clue_encrypted", "expires_at"},
-                null, null, null, null, "received_at ASC", Integer.toString(MAX_READ_RECEIPTS))) {
-            while (cursor.moveToNext()) {
-                requests.add(new ReadReceiptRequest(
-                        cursor.getString(0),
-                        cursor.getLong(1),
-                        CryptoStore.decrypt(cursor.getString(2)),
-                        CryptoStore.decrypt(cursor.getString(3)),
-                        cursor.getLong(4)));
+    List<ReadReceiptRequest> readReceiptRequests(long now) {
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                expireReadReceiptsLocked(now);
+                List<ReadReceiptRequest> requests = new ArrayList<>();
+                try (Cursor cursor = getReadableDatabase().query(
+                        "pending_read_receipts",
+                        new String[]{"id", "received_at", "sender_encrypted", "match_clue_encrypted", "expires_at"},
+                        null, null, null, null, "received_at ASC", Integer.toString(MAX_READ_RECEIPTS))) {
+                    while (cursor.moveToNext()) {
+                        requests.add(new ReadReceiptRequest(
+                                cursor.getString(0),
+                                cursor.getLong(1),
+                                CryptoStore.decrypt(cursor.getString(2)),
+                                CryptoStore.decrypt(cursor.getString(3)),
+                                cursor.getLong(4)));
+                    }
+                }
+                return requests;
             }
         }
-        return requests;
     }
 
-    synchronized int expireReadReceipts(long now) {
+    int expireReadReceipts(long now) {
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                return expireReadReceiptsLocked(now);
+            }
+        }
+    }
+
+    private int expireReadReceiptsLocked(long now) {
         List<String> expiredIds = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().query(
                 "pending_read_receipts",
@@ -634,6 +646,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 new String[]{"id"},
                 "id = ?",
                 new String[]{id},
+                null, null, null, "1")) {
+            return cursor.moveToFirst();
+        }
+    }
+
+    synchronized boolean hasUnexpiredReadReceipt(String id, long now) {
+        try (Cursor cursor = getReadableDatabase().query(
+                "pending_read_receipts",
+                new String[]{"id"},
+                "id = ? AND expires_at > ?",
+                new String[]{id, Long.toString(now)},
                 null, null, null, "1")) {
             return cursor.moveToFirst();
         }

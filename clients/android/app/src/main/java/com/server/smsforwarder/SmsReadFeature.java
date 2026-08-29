@@ -11,6 +11,7 @@ final class SmsReadFeature {
     private static final String PREFS = "sms_read_feature";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_GENERATION = "generation";
+    private static final String KEY_CLEANUP_PENDING = "cleanup_pending";
     private static final long REQUEST_TTL_MS = 10L * 60L * 1000L;
     private static final Object OPERATION_LOCK = new Object();
 
@@ -24,6 +25,10 @@ final class SmsReadFeature {
     static void setEnabled(Context context, boolean enabled) {
         synchronized (OPERATION_LOCK) {
             SharedPreferences preferences = prefs(context);
+            if (enabled && preferences.getBoolean(KEY_CLEANUP_PENDING, false)) {
+                clearReadLinkData(context);
+                preferences.edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
+            }
             boolean wasEnabled = preferences.getBoolean(KEY_ENABLED, false);
             long generation = preferences.getLong(KEY_GENERATION, 1L);
             if (!enabled && wasEnabled) {
@@ -32,10 +37,26 @@ final class SmsReadFeature {
             preferences.edit()
                     .putBoolean(KEY_ENABLED, enabled)
                     .putLong(KEY_GENERATION, generation)
+                    .putBoolean(KEY_CLEANUP_PENDING, !enabled)
                     .commit();
             if (!enabled) {
-                clearDisabledLinkageData(context);
+                SmsNotificationListener.onFeatureDisabled();
+                clearReadLinkData(context);
+                preferences.edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
             }
+        }
+    }
+
+    static boolean enableAfterAccess(Context context) {
+        if (!hasNotificationAccess(context)) {
+            return false;
+        }
+        try {
+            setEnabled(context, true);
+            return isEnabled(context) && !isCleanupPending(context);
+        } catch (RuntimeException error) {
+            ReadReceiptCleanupWorker.schedulePrivacyCleanup(context);
+            return false;
         }
     }
 
@@ -51,7 +72,9 @@ final class SmsReadFeature {
 
     static void reconcileDisabledLinkageData(Context context) {
         synchronized (OPERATION_LOCK) {
-            if (isEnabled(context) && hasNotificationAccess(context)) {
+            if (isEnabled(context)
+                    && hasNotificationAccess(context)
+                    && !isCleanupPending(context)) {
                 return;
             }
             if (isEnabled(context)) {
@@ -60,7 +83,9 @@ final class SmsReadFeature {
                 setEnabled(context, false);
                 return;
             }
-            clearDisabledLinkageData(context);
+            SmsNotificationListener.onFeatureDisabled();
+            clearReadLinkData(context);
+            prefs(context).edit().putBoolean(KEY_CLEANUP_PENDING, false).commit();
         }
     }
 
@@ -101,24 +126,30 @@ final class SmsReadFeature {
     static void onForwardSuccess(Context context, QueueDatabase database, QueueItem item) {
         synchronized (OPERATION_LOCK) {
             String detail = "SMTP 服务器已接受邮件";
-            boolean receiptInserted = false;
-            if (QueueItem.KIND_SMS.equals(item.kind) && isEnabled(context)) {
-                if (!isEligibleForReadLink(item)) {
-                    detail = "SMTP 服务器已接受邮件 · 手动重新转发不执行系统短信已读联动";
-                } else if (!hasCurrentReadLinkGeneration(context, item)) {
-                    detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（发送期间曾关闭已读联动）";
-                } else if (!hasNotificationAccess(context)) {
-                    detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（通知使用权未授权）";
-                } else {
-                    long now = System.currentTimeMillis();
-                    database.enqueueReadReceipt(item, requestExpiry(now));
-                    detail = "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读";
-                    receiptInserted = true;
+            boolean receiptAttempted = false;
+            try {
+                if (QueueItem.KIND_SMS.equals(item.kind) && isEnabled(context)) {
+                    if (!isEligibleForReadLink(item)) {
+                        detail = "SMTP 服务器已接受邮件 · 手动重新转发不执行系统短信已读联动";
+                    } else if (!hasCurrentReadLinkGeneration(context, item)) {
+                        detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（发送期间曾关闭已读联动）";
+                    } else if (!hasNotificationAccess(context)) {
+                        detail = "SMTP 服务器已接受邮件 · 系统短信未标记已读（通知使用权未授权）";
+                    } else {
+                        long now = System.currentTimeMillis();
+                        receiptAttempted = true;
+                        database.enqueueReadReceipt(item, requestExpiry(now));
+                        detail = "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读";
+                    }
                 }
-            }
-            database.updateReadReceiptOutcome(item.id, detail);
-            if (receiptInserted) {
-                ReadReceiptCleanupWorker.schedule(context);
+                database.updateReadReceiptOutcome(item.id, detail);
+            } finally {
+                if (receiptAttempted) {
+                    // This request is intentionally immediate and query-free. Even if insertion
+                    // succeeded and trimming/history bookkeeping then threw, the unique worker
+                    // either schedules the real expiry or removes the possibly inserted receipt.
+                    ReadReceiptCleanupWorker.scheduleReceiptReconcile(context);
+                }
             }
         }
     }
@@ -143,7 +174,7 @@ final class SmsReadFeature {
             if (!canDispatchReadAction(
                     isEnabled(context),
                     hasNotificationAccess(context),
-                    database.hasReadReceipt(id))) {
+                    database.hasUnexpiredReadReceipt(id, System.currentTimeMillis()))) {
                 return false;
             }
             actionIntent.send();
@@ -189,6 +220,10 @@ final class SmsReadFeature {
         return featureEnabled && notificationAccess;
     }
 
+    static boolean isCleanupPending(Context context) {
+        return prefs(context).getBoolean(KEY_CLEANUP_PENDING, false);
+    }
+
     static Object operationLock() {
         return OPERATION_LOCK;
     }
@@ -197,8 +232,7 @@ final class SmsReadFeature {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    private static void clearDisabledLinkageData(Context context) {
-        SmsNotificationListener.onFeatureDisabled();
+    private static void clearReadLinkData(Context context) {
         QueueDatabase database = QueueDatabase.get(context);
         database.cancelReadReceipts(
                 "SMTP 服务器已接受邮件 · 已读联动已关闭");

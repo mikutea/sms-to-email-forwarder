@@ -29,9 +29,10 @@ public final class SmsReadPolicyTest {
 
     @Test
     public void disabledOrRevokedReadLinkRequiresPrivacyCleanup() {
-        assertFalse(ReadReceiptCleanupWorker.needsDisabledCleanup(true, true));
-        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(true, false));
-        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(false, true));
+        assertFalse(ReadReceiptCleanupWorker.needsDisabledCleanup(true, true, false));
+        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(true, false, false));
+        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(false, true, false));
+        assertTrue(ReadReceiptCleanupWorker.needsDisabledCleanup(true, true, true));
     }
 
     @Test

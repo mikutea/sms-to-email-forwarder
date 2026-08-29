@@ -458,6 +458,19 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void anExpiredReadReceiptCannotPassTheFinalDispatchCheck() {
+        long now = System.currentTimeMillis();
+        QueueItem item = new QueueItem(
+                "expired-final-dispatch", QueueItem.KIND_SMS, now,
+                "10018", "虚构的到期竞态测试", 0, 0);
+        database.enqueueReadReceipt(item, now - 1L);
+
+        synchronized (SmsReadFeature.operationLock()) {
+            assertFalse(database.hasUnexpiredReadReceipt(item.id, now));
+        }
+    }
+
+    @Test
     public void failedReadReceiptCleanupSchedulingClearsTemporaryMatchingData() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         long now = System.currentTimeMillis();
@@ -494,6 +507,59 @@ public final class QueueRecoveryAndroidTest {
         QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
         assertTrue(item.bodyMatchClue.isEmpty());
         assertEquals(0L, item.readLinkGeneration);
+    }
+
+    @Test
+    public void pendingOptOutCleanupFinishesBeforeReadLinkCanBeReenabled() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        SmsReadFeature.setEnabled(context, false);
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms(
+                        "10019",
+                        "虚构的重新开启前清理测试",
+                        "上次授权代次的虚构线索",
+                        now,
+                        now,
+                        0,
+                        SmsReadFeature.currentGeneration(context)));
+        context.getSharedPreferences("sms_read_feature", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("cleanup_pending", true)
+                .commit();
+
+        SmsReadFeature.setEnabled(context, true);
+
+        assertTrue(SmsReadFeature.isEnabled(context));
+        assertFalse(SmsReadFeature.isCleanupPending(context));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        assertTrue(item.bodyMatchClue.isEmpty());
+        assertEquals(0L, item.readLinkGeneration);
+    }
+
+    @Test
+    public void readReceiptExpiryUsesTheFinalDispatchOperationLock() throws Exception {
+        long now = System.currentTimeMillis();
+        QueueItem item = new QueueItem(
+                "locked-expiry", QueueItem.KIND_SMS, now,
+                "10020", "虚构的到期串行化测试", 0, 0);
+        database.enqueueReadReceipt(item, now - 1L);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        Thread expiryThread = new Thread(() -> {
+            started.countDown();
+            database.expireReadReceipts(now);
+            finished.countDown();
+        });
+
+        synchronized (SmsReadFeature.operationLock()) {
+            expiryThread.start();
+            assertTrue(started.await(2L, TimeUnit.SECONDS));
+            assertFalse(finished.await(200L, TimeUnit.MILLISECONDS));
+        }
+        assertTrue(finished.await(2L, TimeUnit.SECONDS));
+        expiryThread.join(2_000L);
+        assertFalse(database.hasReadReceipt(item.id));
     }
 
     @Test

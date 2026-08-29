@@ -28,7 +28,8 @@ public final class ReadReceiptCleanupWorker extends Worker {
         Context context = getApplicationContext();
         boolean disabledCleanup = needsDisabledCleanup(
                 SmsReadFeature.isEnabled(context),
-                SmsReadFeature.hasNotificationAccess(context));
+                SmsReadFeature.hasNotificationAccess(context),
+                SmsReadFeature.isCleanupPending(context));
         try {
             if (disabledCleanup) {
                 SmsReadFeature.reconcileDisabledLinkageData(context);
@@ -61,14 +62,28 @@ public final class ReadReceiptCleanupWorker extends Worker {
 
     static void reconcile(Context context) {
         if (needsDisabledCleanup(
-                SmsReadFeature.isEnabled(context), SmsReadFeature.hasNotificationAccess(context))) {
+                SmsReadFeature.isEnabled(context),
+                SmsReadFeature.hasNotificationAccess(context),
+                SmsReadFeature.isCleanupPending(context))) {
             schedulePrivacyCleanup(context);
             return;
         }
-        schedule(context, ExistingWorkPolicy.KEEP);
+        try {
+            schedule(context, ExistingWorkPolicy.KEEP);
+        } catch (RuntimeException error) {
+            scheduleReceiptReconcile(context);
+        }
     }
 
     static void schedulePrivacyCleanup(Context context) {
+        scheduleImmediate(context, true);
+    }
+
+    static void scheduleReceiptReconcile(Context context) {
+        scheduleImmediate(context, false);
+    }
+
+    private static void scheduleImmediate(Context context, boolean disabledCleanup) {
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(
                 ReadReceiptCleanupWorker.class).build();
         Context applicationContext = context.getApplicationContext();
@@ -82,18 +97,19 @@ public final class ReadReceiptCleanupWorker extends Worker {
                     operation.getResult().get();
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    attemptDisabledCleanup(applicationContext);
+                    attemptImmediateFailureCleanup(applicationContext, disabledCleanup);
                 } catch (ExecutionException | RuntimeException error) {
-                    attemptDisabledCleanup(applicationContext);
+                    attemptImmediateFailureCleanup(applicationContext, disabledCleanup);
                 }
             }, Runnable::run);
         } catch (RuntimeException error) {
-            attemptDisabledCleanup(applicationContext);
+            attemptImmediateFailureCleanup(applicationContext, disabledCleanup);
         }
     }
 
-    static boolean needsDisabledCleanup(boolean featureEnabled, boolean accessGranted) {
-        return !featureEnabled || !accessGranted;
+    static boolean needsDisabledCleanup(
+            boolean featureEnabled, boolean accessGranted, boolean cleanupPending) {
+        return cleanupPending || !featureEnabled || !accessGranted;
     }
 
     private static void schedule(Context context, ExistingWorkPolicy policy) {
@@ -135,9 +151,14 @@ public final class ReadReceiptCleanupWorker extends Worker {
         }
     }
 
-    private static void attemptDisabledCleanup(Context context) {
+    private static void attemptImmediateFailureCleanup(
+            Context context, boolean disabledCleanup) {
         try {
-            SmsReadFeature.reconcileDisabledLinkageData(context);
+            if (disabledCleanup) {
+                SmsReadFeature.reconcileDisabledLinkageData(context);
+            } else {
+                handleSchedulingFailure(context);
+            }
         } catch (RuntimeException ignored) {
             // A later app start, package replacement, or boot calls reconcile() again. If the
             // WorkManager database itself is unavailable there is no second durable scheduler to

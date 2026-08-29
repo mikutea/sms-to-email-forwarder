@@ -256,9 +256,12 @@ public final class MainActivity extends Activity {
         if (awaitingNotificationAccess) {
             awaitingNotificationAccess = false;
             if (SmsReadFeature.hasNotificationAccess(this)) {
-                SmsReadFeature.setEnabled(this, true);
-                SmsNotificationListener.requestProcessing(this);
-                showToast("已开启：转发成功后尝试标记系统短信已读");
+                if (SmsReadFeature.enableAfterAccess(this)) {
+                    SmsNotificationListener.requestProcessing(this);
+                    showToast("已开启：转发成功后尝试标记系统短信已读");
+                } else {
+                    showToast("正在完成上次关闭清理，请稍后重试");
+                }
             } else {
                 SmsReadFeature.disableAndScheduleCleanup(this);
                 showGlassDialog(
@@ -1470,9 +1473,15 @@ public final class MainActivity extends Activity {
             }
             if (checked) {
                 if (SmsReadFeature.hasNotificationAccess(this)) {
-                    SmsReadFeature.setEnabled(this, true);
-                    SmsNotificationListener.requestProcessing(this);
-                    showToast("已开启自动已读联动");
+                    if (SmsReadFeature.enableAfterAccess(this)) {
+                        SmsNotificationListener.requestProcessing(this);
+                        showToast("已开启自动已读联动");
+                    } else {
+                        changingMarkRead[0] = true;
+                        button.setChecked(false);
+                        changingMarkRead[0] = false;
+                        showToast("正在完成上次关闭清理，请稍后重试");
+                    }
                 } else {
                     changingMarkRead[0] = true;
                     button.setChecked(false);

@@ -99,6 +99,40 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void disablingReadLinkErasesOriginalBodyCluesStillInTheQueue() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        SmsReadFeature.setEnabled(context, true);
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms(
+                        "10007",
+                        "隐私模式转换后的正文",
+                        SmsNotificationMatcher.bodyMatchClue("虚构的原始短信线索用于关闭测试"),
+                        now,
+                        now,
+                        0));
+
+        SmsReadFeature.setEnabled(context, false);
+
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        assertEquals("", item.bodyMatchClue);
+    }
+
+    @Test
+    public void manualHistoryResendCannotMasqueradeAsANewLocalSmsReceipt() {
+        long receivedAt = System.currentTimeMillis() - 60L * 60L * 1000L;
+        HistoryItem history = new HistoryItem(
+                "manual-resend", receivedAt, "10008", "虚构的手动重发正文", 0,
+                "SUCCESS", 0, "SMTP 服务器已接受邮件");
+
+        assertTrue(database.requeue(history));
+
+        QueueItem item = database.claimReady(System.currentTimeMillis() + 1_000L, 1).get(0);
+        assertEquals(0L, item.localReceivedAt);
+        assertFalse(SmsReadFeature.isEligibleForReadLink(item));
+    }
+
+    @Test
     public void claimLeaseProtectsAFullSingleMessageSmtpWindow() {
         long now = System.currentTimeMillis();
         assertEquals(QueueDatabase.EnqueueResult.INSERTED,

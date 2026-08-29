@@ -22,8 +22,10 @@ final class SmsReadFeature {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
         if (!enabled) {
             SmsNotificationListener.onFeatureDisabled();
-            QueueDatabase.get(context).cancelReadReceipts(
+            QueueDatabase database = QueueDatabase.get(context);
+            database.cancelReadReceipts(
                     "SMTP 服务器已接受邮件 · 已读联动已关闭");
+            database.clearPendingReadMatchClues();
         }
     }
 
@@ -40,6 +42,9 @@ final class SmsReadFeature {
         if (!QueueItem.KIND_SMS.equals(item.kind) || !isEnabled(context)) {
             return "SMTP 服务器已接受邮件";
         }
+        if (!isEligibleForReadLink(item)) {
+            return "SMTP 服务器已接受邮件 · 手动重新转发不执行系统短信已读联动";
+        }
         if (!hasNotificationAccess(context)) {
             return "SMTP 服务器已接受邮件 · 系统短信未标记已读（通知使用权未授权）";
         }
@@ -53,6 +58,10 @@ final class SmsReadFeature {
     static long requestExpiry(long forwardingSucceededAt) {
         // The SMS timestamp is untrusted carrier input and must never extend local retention.
         return forwardingSucceededAt + REQUEST_TTL_MS;
+    }
+
+    static boolean isEligibleForReadLink(QueueItem item) {
+        return QueueItem.KIND_SMS.equals(item.kind) && item.localReceivedAt > 0L;
     }
 
     private static SharedPreferences prefs(Context context) {

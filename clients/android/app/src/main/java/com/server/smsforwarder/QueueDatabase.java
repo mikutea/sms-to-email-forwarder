@@ -336,7 +336,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 item.body,
                 "",
                 item.receivedAt,
-                System.currentTimeMillis(),
+                0L,
                 item.simSlot) == EnqueueResult.INSERTED;
     }
 
@@ -532,6 +532,16 @@ final class QueueDatabase extends SQLiteOpenHelper {
             updateReadReceiptOutcome(id, detail);
         }
         getWritableDatabase().delete("pending_read_receipts", null, null);
+    }
+
+    synchronized int clearPendingReadMatchClues() {
+        ContentValues values = new ContentValues();
+        values.put("match_clue_encrypted", "");
+        return getWritableDatabase().update(
+                "pending_messages",
+                values,
+                "kind = ? AND match_clue_encrypted <> ''",
+                new String[]{QueueItem.KIND_SMS});
     }
 
     synchronized void updateReadReceiptOutcome(String id, String detail) {

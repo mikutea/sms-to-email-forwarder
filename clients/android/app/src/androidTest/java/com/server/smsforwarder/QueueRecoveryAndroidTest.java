@@ -312,6 +312,33 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void clearingQueueRollsBackPendingDeletionWhenReadReceiptRemovalFails() {
+        long now = System.currentTimeMillis();
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10023", "虚构的原子清空回滚测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.enqueueReadReceipt(item, now + 60_000L);
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.execSQL("CREATE TEMP TRIGGER fail_read_receipt_clear "
+                + "BEFORE DELETE ON pending_read_receipts "
+                + "BEGIN SELECT RAISE(ABORT, 'forced atomic clear failure'); END");
+
+        boolean failed = false;
+        try {
+            database.clear();
+        } catch (RuntimeException expected) {
+            failed = true;
+        } finally {
+            writable.execSQL("DROP TRIGGER IF EXISTS fail_read_receipt_clear");
+        }
+
+        assertTrue(failed);
+        assertEquals(1, database.count());
+        assertTrue(database.hasReadReceipt(item.id));
+    }
+
+    @Test
     public void failedEnqueueRecoveryUsesAPrivateExplicitAlarm() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
 

@@ -61,4 +61,11 @@ public final class QueuePolicyTest {
         assertFalse(ForwardScheduler.shouldReconcileAfterDuplicate(
                 QueueDatabase.EnqueueResult.CAPACITY_REACHED));
     }
+
+    @Test
+    public void aStaleRetryWaitRowCannotBecomeAnExplicitHistoricalResend() {
+        assertTrue(ForwardScheduler.isRetryOnlyHistoryStatus("RETRY_WAIT"));
+        assertFalse(ForwardScheduler.isRetryOnlyHistoryStatus("SUCCESS"));
+        assertFalse(ForwardScheduler.isRetryOnlyHistoryStatus("FAILED"));
+    }
 }

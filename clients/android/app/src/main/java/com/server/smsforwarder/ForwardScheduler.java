@@ -74,6 +74,12 @@ final class ForwardScheduler {
         return result == QueueDatabase.EnqueueResult.DUPLICATE;
     }
 
+    static boolean isRetryOnlyHistoryStatus(String status) {
+        // A stale RETRY_WAIT row may disappear after the screen was rendered because a worker
+        // completed delivery. It must never fall through to the explicit historical-resend path.
+        return "RETRY_WAIT".equals(status);
+    }
+
     static void scheduleFromQueue(Context context) {
         scheduleNormalFromQueue(context, ExistingWorkPolicy.KEEP);
     }

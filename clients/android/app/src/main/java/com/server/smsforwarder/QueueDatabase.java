@@ -420,8 +420,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
     void clearHistory() {
         synchronized (SmsReadFeature.operationLock()) {
             synchronized (this) {
-                cancelReadReceipts("SMTP 服务器已接受邮件 · 历史与已读联动数据已由用户清除");
-                getWritableDatabase().delete("message_history", null, null);
+                SQLiteDatabase database = getWritableDatabase();
+                database.beginTransaction();
+                try {
+                    cancelReadReceiptsLocked(
+                            database,
+                            "SMTP 服务器已接受邮件 · 历史与已读联动数据已由用户清除");
+                    database.delete("message_history", null, null);
+                    database.setTransactionSuccessful();
+                } finally {
+                    database.endTransaction();
+                }
             }
         }
     }
@@ -546,8 +555,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
         synchronized (SmsReadFeature.operationLock()) {
             SmsReadFeature.invalidateReadLinkGeneration(applicationContext);
             synchronized (this) {
-                getWritableDatabase().delete("pending_messages", null, null);
-                cancelReadReceipts("SMTP 服务器已接受邮件 · 已读联动请求已由用户清除");
+                SQLiteDatabase database = getWritableDatabase();
+                database.beginTransaction();
+                try {
+                    database.delete("pending_messages", null, null);
+                    cancelReadReceiptsLocked(
+                            database,
+                            "SMTP 服务器已接受邮件 · 已读联动请求已由用户清除");
+                    database.setTransactionSuccessful();
+                } finally {
+                    database.endTransaction();
+                }
             }
         }
     }
@@ -670,18 +688,26 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     synchronized void cancelReadReceipts(String detail) {
-        List<String> ids = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                "pending_read_receipts", new String[]{"id"},
-                null, null, null, null, null)) {
-            while (cursor.moveToNext()) {
-                ids.add(cursor.getString(0));
-            }
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try {
+            cancelReadReceiptsLocked(database, detail);
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
         }
-        for (String id : ids) {
-            updateReadReceiptOutcome(id, detail);
-        }
-        getWritableDatabase().delete("pending_read_receipts", null, null);
+    }
+
+    private static void cancelReadReceiptsLocked(SQLiteDatabase database, String detail) {
+        ContentValues values = new ContentValues();
+        values.put("detail", sanitizeDetail(detail));
+        values.put("updated_at", System.currentTimeMillis());
+        database.update(
+                "message_history",
+                values,
+                "id IN (SELECT id FROM pending_read_receipts)",
+                null);
+        database.delete("pending_read_receipts", null, null);
     }
 
     synchronized int clearPendingReadMatchClues() {

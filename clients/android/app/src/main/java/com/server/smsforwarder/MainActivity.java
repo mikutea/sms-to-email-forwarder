@@ -3884,9 +3884,12 @@ public final class MainActivity extends Activity {
         resend.setOnClickListener(view -> {
             if (item.id.startsWith("visual-")) {
                 showToast("视觉测试记录不会写入发送队列");
-            } else if ("RETRY_WAIT".equals(item.status)
-                    && ForwardScheduler.retryNow(this, item.id)) {
-                showToast("此条已设为立即重试");
+            } else if (ForwardScheduler.isRetryOnlyHistoryStatus(item.status)) {
+                if (ForwardScheduler.retryNow(this, item.id)) {
+                    showToast("此条已设为立即重试");
+                } else {
+                    showToast("发送状态已变化，本次没有重复转发");
+                }
                 showPage(PAGE_HISTORY);
             } else if (QueueDatabase.get(this).requeue(item)) {
                 ForwardScheduler.schedule(this);

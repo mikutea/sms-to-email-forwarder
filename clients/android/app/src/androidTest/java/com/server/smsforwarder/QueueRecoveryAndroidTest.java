@@ -316,7 +316,29 @@ public final class QueueRecoveryAndroidTest {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
         ForwardScheduler.scheduleEnqueueRecovery(context);
+        assertTrue(ForwardScheduler.hasEnqueueRecovery(context));
         ForwardScheduler.cancelEnqueueRecovery(context);
+        assertFalse(ForwardScheduler.hasEnqueueRecovery(context));
+    }
+
+    @Test
+    public void successfulRetryWakeupDoesNotCancelAnExistingRecoveryAlarm() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10015", "虚构的恢复闹钟竞态测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markRetry(item.id, 1, now + 60_000L);
+        ForwardScheduler.scheduleEnqueueRecovery(context);
+
+        ForwardScheduler.scheduleUrgentRetryFromQueue(context);
+        List<WorkInfo> work = WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(ForwardScheduler.RETRY_WAKEUP_WORK_NAME)
+                .get(5L, TimeUnit.SECONDS);
+
+        assertFalse(work.isEmpty());
+        assertTrue(ForwardScheduler.hasEnqueueRecovery(context));
     }
 
     @Test
@@ -329,6 +351,23 @@ public final class QueueRecoveryAndroidTest {
 
         assertEquals(2, QueueDatabase.coalescePendingHeartbeats(writable));
         assertEquals(1, database.pendingStats().heartbeat);
+    }
+
+    @Test
+    public void migrationTrimsLegacyNonSmsBacklogToItsReservedCapacity() {
+        database.clear();
+        SQLiteDatabase writable = database.getWritableDatabase();
+        for (int position = 0; position < 75; position++) {
+            insertLegacyNonSms(
+                    writable,
+                    "legacy-alert-" + position,
+                    QueueItem.KIND_ALERT,
+                    position);
+        }
+
+        assertEquals(25, QueueDatabase.trimPendingNonSms(writable));
+        assertEquals(50, database.pendingStats().alert);
+        assertEquals(50, database.pendingStats().total);
     }
 
     @Test
@@ -419,6 +458,23 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void failedReadReceiptCleanupSchedulingClearsTemporaryMatchingData() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long now = System.currentTimeMillis();
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10016", "虚构的清理调度失败测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markSuccess(item.id, 0, "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
+        database.remove(item.id);
+        database.enqueueReadReceipt(item, now + 60_000L);
+
+        ReadReceiptCleanupWorker.handleSchedulingFailure(context);
+
+        assertFalse(database.hasReadReceipt(item.id));
+        assertTrue(database.recentHistory(5).get(0).detail.contains("清理任务调度失败"));
+    }
+
+    @Test
     public void notificationListenerIsPrivateAndSystemPermissionProtected() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         ComponentName component = SmsReadFeature.listenerComponent(context);
@@ -434,9 +490,14 @@ public final class QueueRecoveryAndroidTest {
 
     private static void insertLegacyHeartbeat(
             SQLiteDatabase database, String id, long createdAt) {
+        insertLegacyNonSms(database, id, QueueItem.KIND_HEARTBEAT, createdAt);
+    }
+
+    private static void insertLegacyNonSms(
+            SQLiteDatabase database, String id, String kind, long createdAt) {
         ContentValues values = new ContentValues();
         values.put("id", id);
-        values.put("kind", QueueItem.KIND_HEARTBEAT);
+        values.put("kind", kind);
         values.put("received_at", createdAt);
         values.put("sender_encrypted", "");
         values.put("body_encrypted", "");

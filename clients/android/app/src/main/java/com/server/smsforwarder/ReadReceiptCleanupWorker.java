@@ -5,10 +5,12 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
+import androidx.work.Operation;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 public final class ReadReceiptCleanupWorker extends Worker {
@@ -48,9 +50,32 @@ public final class ReadReceiptCleanupWorker extends Worker {
                 ReadReceiptCleanupWorker.class)
                 .setInitialDelay(delay, TimeUnit.MILLISECONDS)
                 .build();
-        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(
-                WORK_NAME,
-                policy,
-                request);
+        Context applicationContext = context.getApplicationContext();
+        try {
+            Operation operation = WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    WORK_NAME,
+                    policy,
+                    request);
+            operation.getResult().addListener(() -> {
+                try {
+                    operation.getResult().get();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    handleSchedulingFailure(applicationContext);
+                } catch (ExecutionException | RuntimeException error) {
+                    handleSchedulingFailure(applicationContext);
+                }
+            }, Runnable::run);
+        } catch (RuntimeException error) {
+            handleSchedulingFailure(applicationContext);
+        }
+    }
+
+    static void handleSchedulingFailure(Context context) {
+        synchronized (SmsReadFeature.operationLock()) {
+            QueueDatabase.get(context).cancelReadReceipts(
+                    "SMTP 服务器已接受邮件 · 系统短信未标记已读"
+                            + "（清理任务调度失败，已清除临时匹配线索）");
+        }
     }
 }

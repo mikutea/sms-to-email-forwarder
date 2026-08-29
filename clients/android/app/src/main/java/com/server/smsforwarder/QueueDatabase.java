@@ -95,6 +95,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             coalescePendingHeartbeats(db);
         }
         if (oldVersion < 7) {
+            trimPendingNonSms(db);
             db.execSQL(
                     "ALTER TABLE pending_messages "
                             + "ADD COLUMN read_link_generation INTEGER NOT NULL DEFAULT 0");
@@ -829,6 +830,30 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 "id IN (SELECT id FROM pending_messages WHERE " + where + ")",
                 args);
         return database.delete("pending_messages", where, args);
+    }
+
+    static int trimPendingNonSms(SQLiteDatabase database) {
+        List<String> overflowIds = new ArrayList<>();
+        try (Cursor cursor = database.query(
+                "pending_messages",
+                new String[]{"id"},
+                "kind <> ?",
+                new String[]{QueueItem.KIND_SMS},
+                null,
+                null,
+                "created_at DESC, id DESC")) {
+            int position = 0;
+            while (cursor.moveToNext()) {
+                if (position++ >= MAX_NON_SMS_ROWS) {
+                    overflowIds.add(cursor.getString(0));
+                }
+            }
+        }
+        for (String id : overflowIds) {
+            database.delete("message_history", "id = ?", new String[]{id});
+            database.delete("pending_messages", "id = ?", new String[]{id});
+        }
+        return overflowIds.size();
     }
 
     private int currentAttempts(String id) {

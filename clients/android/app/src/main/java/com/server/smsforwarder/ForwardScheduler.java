@@ -110,7 +110,6 @@ final class ForwardScheduler {
             operation.getResult().addListener(() -> {
                 try {
                     operation.getResult().get();
-                    cancelEnqueueRecovery(applicationContext);
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     scheduleEnqueueRecovery(applicationContext);
@@ -153,7 +152,6 @@ final class ForwardScheduler {
             operation.getResult().addListener(() -> {
                 try {
                     operation.getResult().get();
-                    cancelEnqueueRecovery(applicationContext);
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     acknowledgeUrgentWork(applicationContext, reservationToken);
@@ -253,6 +251,10 @@ final class ForwardScheduler {
             alarmManager.cancel(pending);
         }
         pending.cancel();
+    }
+
+    static boolean hasEnqueueRecovery(Context context) {
+        return enqueueRecoveryIntent(context, PendingIntent.FLAG_NO_CREATE) != null;
     }
 
     @SuppressLint("ApplySharedPref")

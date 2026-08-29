@@ -17,7 +17,11 @@ Use synthetic messages for automated tests. Revoke a credential immediately if i
 - Server certificate hostname verification remains enabled.
 - SMTP credentials and pending SMS content are encrypted with an Android Keystore key.
 - Android backup and device-transfer extraction are disabled for app data.
-- The app does not request historical SMS, call-log, contacts, storage, accessibility, or notification-listener access.
+- The app does not request historical SMS, call-log, contacts, storage, or accessibility access.
+- Notification access is an optional, default-off feature used only after SMTP acceptance to
+  request a semantic mark-read action exposed by the current default SMS app. Matching clues are
+  bounded, encrypted with the Android Keystore, and removed on opt-out, timeout, scheduling
+  failure, history clearing, or queue clearing.
 
 ## Reporting
 

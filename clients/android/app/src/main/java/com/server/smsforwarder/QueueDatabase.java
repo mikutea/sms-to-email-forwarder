@@ -237,6 +237,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             values.put("next_attempt_at", now);
             values.put("lease_until", 0L);
             values.put("delivered_mask", 0);
+            values.put("smtp_accepted_at", 0L);
             values.put("created_at", now);
             int updated = database.update(
                     "pending_messages",

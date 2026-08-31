@@ -96,6 +96,29 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void refreshedHeartbeatResetsEarlierPartialDeliveryState() {
+        long now = System.currentTimeMillis();
+        long oldAcceptedAt = now - 24L * 60L * 60L * 1000L;
+        assertTrue(database.enqueueStatus(
+                QueueItem.KIND_HEARTBEAT, "旧心跳", "旧状态"));
+        QueueItem oldHeartbeat = database.claimReady(now + 1_000L, 1).get(0);
+        assertEquals(oldAcceptedAt, database.markDelivered(
+                oldHeartbeat.id, 1, oldAcceptedAt));
+        database.markRetry(oldHeartbeat.id, 1, now + 60_000L);
+
+        assertTrue(database.enqueueStatus(
+                QueueItem.KIND_HEARTBEAT, "新心跳", "新状态"));
+        QueueItem refreshed = database.claimReady(
+                System.currentTimeMillis() + 1_000L, 1).get(0);
+
+        assertEquals(oldHeartbeat.id, refreshed.id);
+        assertEquals("新心跳", refreshed.sender);
+        assertEquals("新状态", refreshed.body);
+        assertEquals(0, refreshed.deliveredMask);
+        assertEquals(0L, refreshed.smtpAcceptedAt);
+    }
+
+    @Test
     public void readReceiptRequestRoundTripsEncryptedLocalData() {
         long carrierTimestamp = System.currentTimeMillis() - 60L * 60L * 1000L;
         long localReceivedAt = System.currentTimeMillis();

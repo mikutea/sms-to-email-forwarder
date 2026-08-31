@@ -368,6 +368,41 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void dailySuccessCountUsesSmtpAcceptanceInsteadOfSmsReceiptOrLaterDetailUpdates() {
+        long dayStart = 1_800_000_000_000L;
+        long dayEnd = dayStart + 24L * 60L * 60L * 1000L;
+
+        setHistoryState(
+                "10031", "虚构的昨日接收今日送达", dayStart - 60_000L,
+                "SUCCESS", dayStart);
+        setHistoryState(
+                "10032", "虚构的今日接收今日送达", dayStart + 60_000L,
+                "SUCCESS", dayEnd - 1L);
+        setHistoryState(
+                "10033", "虚构的今日接收昨日送达", dayStart + 120_000L,
+                "SUCCESS", dayStart - 1L);
+        setHistoryState(
+                "10034", "虚构的边界外送达", dayStart + 180_000L,
+                "SUCCESS", dayEnd);
+        setHistoryState(
+                "10035", "虚构的过滤记录", dayStart + 240_000L,
+                "FILTERED", dayStart + 240_000L);
+
+        assertEquals(2, database.successfulHistoryCount(dayStart, dayEnd));
+        assertEquals(0, database.successfulHistoryCount(dayEnd, dayStart));
+
+        ContentValues laterDetail = new ContentValues();
+        laterDetail.put("updated_at", dayEnd + 60_000L);
+        database.getWritableDatabase().update(
+                "message_history",
+                laterDetail,
+                "id = ?",
+                new String[]{QueueDatabase.stableSmsId(
+                        "10031", "虚构的昨日接收今日送达", dayStart - 60_000L, 0)});
+        assertEquals(2, database.successfulHistoryCount(dayStart, dayEnd));
+    }
+
+    @Test
     public void failedEnqueueRecoveryUsesAPrivateExplicitAlarm() {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
@@ -762,5 +797,21 @@ public final class QueueRecoveryAndroidTest {
         values.put("delivered_mask", 0);
         values.put("created_at", createdAt);
         database.insertOrThrow("pending_messages", null, values);
+    }
+
+    private void setHistoryState(
+            String sender, String body, long receivedAt, String status, long succeededAt) {
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms(sender, body, receivedAt, 0));
+        ContentValues values = new ContentValues();
+        values.put("status", status);
+        values.put("succeeded_at", succeededAt);
+        values.put("updated_at", succeededAt);
+        database.getWritableDatabase().update(
+                "message_history",
+                values,
+                "id = ?",
+                new String[]{QueueDatabase.stableSmsId(sender, body, receivedAt, 0)});
     }
 }

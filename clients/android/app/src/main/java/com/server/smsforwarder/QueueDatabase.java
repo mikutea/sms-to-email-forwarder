@@ -13,7 +13,7 @@ import java.util.UUID;
 
 final class QueueDatabase extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "forward_queue.db";
-    private static final int DATABASE_VERSION = 7;
+    private static final int DATABASE_VERSION = 8;
     private static final long CLAIM_LEASE_MS = 5L * 60L * 1000L;
     private static final int MAX_SMS_ROWS = 500;
     private static final int MAX_NON_SMS_ROWS = 50;
@@ -99,6 +99,20 @@ final class QueueDatabase extends SQLiteOpenHelper {
             db.execSQL(
                     "ALTER TABLE pending_messages "
                             + "ADD COLUMN read_link_generation INTEGER NOT NULL DEFAULT 0");
+        }
+        if (oldVersion < 8) {
+            if (oldVersion >= 4) {
+                db.execSQL(
+                        "ALTER TABLE message_history "
+                                + "ADD COLUMN succeeded_at INTEGER NOT NULL DEFAULT 0");
+            }
+            // Older schemas did not preserve SMTP acceptance separately from later detail
+            // updates. Backfill the best available timestamp once; all new deliveries record
+            // the exact acceptance transition without being moved by read-receipt settlement.
+            db.execSQL(
+                    "UPDATE message_history SET succeeded_at = updated_at "
+                            + "WHERE status = 'SUCCESS' AND succeeded_at = 0");
+            createHistorySuccessIndex(db);
         }
     }
 
@@ -393,6 +407,22 @@ final class QueueDatabase extends SQLiteOpenHelper {
             int simSlot,
             String detail) {
         upsertHistory(id, receivedAt, sender, body, simSlot, "FILTERED", 0, detail);
+    }
+
+    synchronized int successfulHistoryCount(long startInclusive, long endExclusive) {
+        if (endExclusive <= startInclusive) {
+            return 0;
+        }
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT COUNT(*) FROM message_history "
+                        + "WHERE status = ? AND succeeded_at >= ? AND succeeded_at < ?",
+                new String[]{
+                        "SUCCESS",
+                        Long.toString(startInclusive),
+                        Long.toString(endExclusive)
+                })) {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        }
     }
 
     List<HistoryItem> recentHistory(int limit) {
@@ -789,7 +819,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
         values.put("status", status);
         values.put("attempts", attempts);
         values.put("detail", sanitizeDetail(detail));
-        values.put("updated_at", System.currentTimeMillis());
+        long updatedAt = System.currentTimeMillis();
+        values.put("succeeded_at", "SUCCESS".equals(status) ? updatedAt : 0L);
+        values.put("updated_at", updatedAt);
         getWritableDatabase().insertWithOnConflict(
                 "message_history", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         getWritableDatabase().delete(
@@ -821,7 +853,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
         values.put("status", status);
         values.put("attempts", attempts);
         values.put("detail", sanitizeDetail(detail));
-        values.put("updated_at", System.currentTimeMillis());
+        long updatedAt = System.currentTimeMillis();
+        values.put("succeeded_at", "SUCCESS".equals(status) ? updatedAt : 0L);
+        values.put("updated_at", updatedAt);
         database.update("message_history", values, "id = ?", new String[]{id});
     }
 
@@ -835,10 +869,17 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + "status TEXT NOT NULL,"
                 + "attempts INTEGER NOT NULL DEFAULT 0,"
                 + "detail TEXT NOT NULL DEFAULT '',"
+                + "succeeded_at INTEGER NOT NULL DEFAULT 0,"
                 + "updated_at INTEGER NOT NULL"
                 + ")");
         database.execSQL("CREATE INDEX IF NOT EXISTS message_history_updated_idx "
                 + "ON message_history(updated_at DESC)");
+        createHistorySuccessIndex(database);
+    }
+
+    private static void createHistorySuccessIndex(SQLiteDatabase database) {
+        database.execSQL("CREATE INDEX IF NOT EXISTS message_history_success_idx "
+                + "ON message_history(status, succeeded_at)");
     }
 
     private static void createReadReceiptTable(SQLiteDatabase database) {

@@ -102,14 +102,6 @@ final class QueueDatabase extends SQLiteOpenHelper {
         }
     }
 
-    @Override
-    public void onOpen(SQLiteDatabase db) {
-        super.onOpen(db);
-        if (!db.isReadOnly()) {
-            purgeExpiredReadReceipts(db, System.currentTimeMillis());
-        }
-    }
-
     synchronized EnqueueResult enqueueSms(String sender, String body, long receivedAt, int simSlot) {
         return enqueueSms(sender, body, "", receivedAt, System.currentTimeMillis(), simSlot, 0L);
     }
@@ -404,13 +396,21 @@ final class QueueDatabase extends SQLiteOpenHelper {
     }
 
     List<HistoryItem> recentHistory(int limit) {
+        boolean cleanupDeferred = false;
+        List<HistoryItem> items = new ArrayList<>();
         synchronized (SmsReadFeature.operationLock()) {
             synchronized (this) {
                 // Vendor power managers may defer WorkManager well past the logical receipt TTL.
                 // A history read must never keep showing an already-expired request as active, and
                 // it is also a safe foreground opportunity to erase the encrypted match clue.
-                expireReadReceiptsLocked(System.currentTimeMillis());
-                List<HistoryItem> items = new ArrayList<>();
+                try {
+                    expireReadReceiptsLocked(System.currentTimeMillis());
+                } catch (RuntimeException error) {
+                    // History is still useful when SQLite can read but a transient condition such
+                    // as full storage rejects writes. Preserve the read path and retry settlement
+                    // through durable work instead of crashing the activity.
+                    cleanupDeferred = true;
+                }
                 try (Cursor cursor = getReadableDatabase().query(
                         "message_history",
                         new String[]{"id", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "status", "attempts", "detail"},
@@ -432,9 +432,12 @@ final class QueueDatabase extends SQLiteOpenHelper {
                                 cursor.getString(7)));
                     }
                 }
-                return items;
             }
         }
+        if (cleanupDeferred) {
+            ReadReceiptCleanupWorker.scheduleReceiptReconcile(applicationContext);
+        }
+        return items;
     }
 
     void clearHistory() {
@@ -849,23 +852,6 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + ")");
         database.execSQL("CREATE INDEX IF NOT EXISTS pending_read_receipts_expiry_idx "
                 + "ON pending_read_receipts(expires_at)");
-    }
-
-    private static void purgeExpiredReadReceipts(SQLiteDatabase database, long now) {
-        ContentValues history = new ContentValues();
-        history.put(
-                "detail",
-                "SMTP 服务器已接受邮件 · 系统短信未标记已读（未找到可安全调用的系统动作）");
-        history.put("updated_at", now);
-        database.update(
-                "message_history",
-                history,
-                "id IN (SELECT id FROM pending_read_receipts WHERE expires_at <= ?)",
-                new String[]{Long.toString(now)});
-        database.delete(
-                "pending_read_receipts",
-                "expires_at <= ?",
-                new String[]{Long.toString(now)});
     }
 
     private static boolean containsPending(SQLiteDatabase database, String id) {

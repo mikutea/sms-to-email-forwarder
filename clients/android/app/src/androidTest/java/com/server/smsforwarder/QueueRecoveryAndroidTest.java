@@ -474,14 +474,14 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
-    public void canceledReadReceiptDoesNotLeaveHistoryPendingForever() {
+    public void revokedAccessCleanupWinsEvenAfterReadReceiptExpiry() {
         long now = System.currentTimeMillis();
         assertEquals(QueueDatabase.EnqueueResult.INSERTED,
                 database.enqueueSms("10002", "虚构的关闭已读联动测试", now, 0));
         QueueItem item = database.claimReady(System.currentTimeMillis() + 1_000L, 1).get(0);
         database.markSuccess(item.id, 0, "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
         database.remove(item.id);
-        database.enqueueReadReceipt(item, now + 60_000L);
+        database.enqueueReadReceipt(item, now - 1L);
 
         database.cancelReadReceipts("SMTP 服务器已接受邮件 · 已读联动已关闭");
 

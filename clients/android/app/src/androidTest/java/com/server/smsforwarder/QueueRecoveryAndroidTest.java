@@ -145,7 +145,7 @@ public final class QueueRecoveryAndroidTest {
                         now + 1L,
                         0));
 
-        List<QueueItem> items = database.claimReady(now + 1_000L, 2);
+        List<QueueItem> items = database.claimReady(System.currentTimeMillis() + 1_000L, 2);
         assertEquals(2, items.size());
         assertEquals("", items.get(0).bodyMatchClue);
         assertEquals("", items.get(1).bodyMatchClue);

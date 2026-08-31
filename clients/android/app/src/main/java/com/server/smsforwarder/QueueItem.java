@@ -17,6 +17,7 @@ final class QueueItem {
     final String bodyMatchClue;
     final long localReceivedAt;
     final long readLinkGeneration;
+    final long smtpAcceptedAt;
 
     QueueItem(
             String id,
@@ -82,6 +83,23 @@ final class QueueItem {
             String bodyMatchClue,
             long localReceivedAt,
             long readLinkGeneration) {
+        this(id, kind, receivedAt, sender, body, simSlot, attempts, deliveredMask,
+                bodyMatchClue, localReceivedAt, readLinkGeneration, 0L);
+    }
+
+    QueueItem(
+            String id,
+            String kind,
+            long receivedAt,
+            String sender,
+            String body,
+            int simSlot,
+            int attempts,
+            int deliveredMask,
+            String bodyMatchClue,
+            long localReceivedAt,
+            long readLinkGeneration,
+            long smtpAcceptedAt) {
         this.id = id;
         this.kind = kind;
         this.receivedAt = receivedAt;
@@ -93,5 +111,6 @@ final class QueueItem {
         this.bodyMatchClue = bodyMatchClue == null ? "" : bodyMatchClue;
         this.localReceivedAt = localReceivedAt;
         this.readLinkGeneration = readLinkGeneration;
+        this.smtpAcceptedAt = smtpAcceptedAt;
     }
 }

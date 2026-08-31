@@ -33,6 +33,27 @@ public final class LocalDayWindowTest {
         assertEquals(23L * 60L * 60L * 1000L, window.endExclusive - window.startInclusive);
     }
 
+    @Test
+    public void containingComputesTheNextBoundaryIndependentlyAfterAMidnightGap() {
+        TimeZone zone = TimeZone.getTimeZone("America/Santiago");
+        Calendar instant = calendar(zone, 2026, Calendar.SEPTEMBER, 6, 12, 0);
+
+        LocalDayWindow window = LocalDayWindow.containing(instant.getTimeInMillis(), zone);
+        Calendar start = Calendar.getInstance(zone);
+        start.setTimeInMillis(window.startInclusive);
+        Calendar end = Calendar.getInstance(zone);
+        end.setTimeInMillis(window.endExclusive);
+
+        assertEquals(2026, start.get(Calendar.YEAR));
+        assertEquals(Calendar.SEPTEMBER, start.get(Calendar.MONTH));
+        assertEquals(6, start.get(Calendar.DAY_OF_MONTH));
+        assertEquals(1, start.get(Calendar.HOUR_OF_DAY));
+        assertEquals(2026, end.get(Calendar.YEAR));
+        assertEquals(Calendar.SEPTEMBER, end.get(Calendar.MONTH));
+        assertEquals(7, end.get(Calendar.DAY_OF_MONTH));
+        assertEquals(0, end.get(Calendar.HOUR_OF_DAY));
+    }
+
     private static Calendar calendar(
             TimeZone zone, int year, int month, int day, int hour, int minute) {
         Calendar value = Calendar.getInstance(zone);

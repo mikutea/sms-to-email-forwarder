@@ -341,10 +341,12 @@ public final class QueueRecoveryAndroidTest {
     @Test
     public void acceptedDeliveryFinalizationRollsBackWhenPendingRemovalFails() {
         long now = System.currentTimeMillis();
+        long acceptedAt = 1_800_000_060_000L;
         assertEquals(
                 QueueDatabase.EnqueueResult.INSERTED,
                 database.enqueueSms("10024", "虚构的成功状态原子提交测试", now, 0));
         QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        assertEquals(acceptedAt, database.markDelivered(item.id, 1, acceptedAt));
         SQLiteDatabase writable = database.getWritableDatabase();
         writable.execSQL("CREATE TEMP TRIGGER fail_accepted_pending_delete "
                 + "BEFORE DELETE ON pending_messages "
@@ -355,7 +357,8 @@ public final class QueueRecoveryAndroidTest {
             database.completeAcceptedDelivery(
                     item.id,
                     item.attempts,
-                    "SMTP 服务器已接受邮件");
+                    "SMTP 服务器已接受邮件",
+                    acceptedAt);
         } catch (RuntimeException expected) {
             failed = true;
         } finally {
@@ -365,6 +368,17 @@ public final class QueueRecoveryAndroidTest {
         assertTrue(failed);
         assertEquals(1, database.count());
         assertEquals("SENDING", database.recentHistory(5).get(0).status);
+        assertEquals(0L, database.successfulDeliveryCount(
+                acceptedAt - 60_000L, acceptedAt + 60_000L));
+
+        database.completeAcceptedDelivery(
+                item.id,
+                item.attempts,
+                "SMTP 服务器已接受邮件",
+                acceptedAt);
+        assertEquals(0, database.count());
+        assertEquals(1L, database.successfulDeliveryCount(
+                acceptedAt - 60_000L, acceptedAt + 60_000L));
     }
 
     @Test
@@ -372,24 +386,17 @@ public final class QueueRecoveryAndroidTest {
         long dayStart = 1_800_000_000_000L;
         long dayEnd = dayStart + 24L * 60L * 60L * 1000L;
 
-        setHistoryState(
-                "10031", "虚构的昨日接收今日送达", dayStart - 60_000L,
-                "SUCCESS", dayStart);
-        setHistoryState(
-                "10032", "虚构的今日接收今日送达", dayStart + 60_000L,
-                "SUCCESS", dayEnd - 1L);
-        setHistoryState(
-                "10033", "虚构的今日接收昨日送达", dayStart + 120_000L,
-                "SUCCESS", dayStart - 1L);
-        setHistoryState(
-                "10034", "虚构的边界外送达", dayStart + 180_000L,
-                "SUCCESS", dayEnd);
-        setHistoryState(
-                "10035", "虚构的过滤记录", dayStart + 240_000L,
-                "FILTERED", dayStart + 240_000L);
+        recordAcceptedDelivery(
+                "10031", "虚构的昨日接收今日送达", dayStart - 60_000L, dayStart);
+        recordAcceptedDelivery(
+                "10032", "虚构的今日接收今日送达", dayStart + 60_000L, dayEnd - 1L);
+        recordAcceptedDelivery(
+                "10033", "虚构的今日接收昨日送达", dayStart + 120_000L, dayStart - 1L);
+        recordAcceptedDelivery(
+                "10034", "虚构的边界外送达", dayStart + 180_000L, dayEnd);
 
-        assertEquals(2, database.successfulHistoryCount(dayStart, dayEnd));
-        assertEquals(0, database.successfulHistoryCount(dayEnd, dayStart));
+        assertEquals(2L, database.successfulDeliveryCount(dayStart, dayEnd));
+        assertEquals(0L, database.successfulDeliveryCount(dayEnd, dayStart));
 
         ContentValues laterDetail = new ContentValues();
         laterDetail.put("updated_at", dayEnd + 60_000L);
@@ -399,7 +406,48 @@ public final class QueueRecoveryAndroidTest {
                 "id = ?",
                 new String[]{QueueDatabase.stableSmsId(
                         "10031", "虚构的昨日接收今日送达", dayStart - 60_000L, 0)});
-        assertEquals(2, database.successfulHistoryCount(dayStart, dayEnd));
+        assertEquals(2L, database.successfulDeliveryCount(dayStart, dayEnd));
+    }
+
+    @Test
+    public void dailySuccessCountDoesNotShrinkWhenHistoryIsTrimmed() {
+        long dayStart = 1_800_000_000_000L;
+        recordAcceptedDelivery(
+                "10036", "虚构的历史裁剪前成功记录", dayStart, dayStart + 60_000L);
+
+        int overflow = QueueDatabase.historyRowCapacity() + 25;
+        for (int position = 0; position < overflow; position++) {
+            database.recordFiltered(
+                    "synthetic-filtered-" + position,
+                    dayStart + position,
+                    "",
+                    "",
+                    0,
+                    "虚构的历史容量测试");
+        }
+
+        try (android.database.Cursor cursor = database.getReadableDatabase().rawQuery(
+                "SELECT COUNT(*) FROM message_history", null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(QueueDatabase.historyRowCapacity(), cursor.getInt(0));
+        }
+        assertEquals(1L, database.successfulDeliveryCount(
+                dayStart, dayStart + 24L * 60L * 60L * 1000L));
+    }
+
+    @Test
+    public void smtpAcceptanceTimestampSurvivesLaterChannelAndFinalizationRetries() {
+        long receivedAt = System.currentTimeMillis();
+        long firstAcceptedAt = 1_800_086_340_000L;
+        long laterAcceptedAt = firstAcceptedAt + 120_000L;
+        assertEquals(
+                QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10037", "虚构的首次接受时间测试", receivedAt, 0));
+        QueueItem item = database.claimReady(receivedAt + 1_000L, 1).get(0);
+
+        assertEquals(firstAcceptedAt, database.markDelivered(item.id, 1, firstAcceptedAt));
+        assertEquals(firstAcceptedAt, database.markDelivered(item.id, 3, laterAcceptedAt));
+        assertEquals(firstAcceptedAt, database.ensureSmtpAcceptedAt(item.id, laterAcceptedAt));
     }
 
     @Test
@@ -799,19 +847,18 @@ public final class QueueRecoveryAndroidTest {
         database.insertOrThrow("pending_messages", null, values);
     }
 
-    private void setHistoryState(
-            String sender, String body, long receivedAt, String status, long succeededAt) {
+    private void recordAcceptedDelivery(
+            String sender, String body, long receivedAt, long succeededAt) {
         assertEquals(
                 QueueDatabase.EnqueueResult.INSERTED,
                 database.enqueueSms(sender, body, receivedAt, 0));
-        ContentValues values = new ContentValues();
-        values.put("status", status);
-        values.put("succeeded_at", succeededAt);
-        values.put("updated_at", succeededAt);
-        database.getWritableDatabase().update(
-                "message_history",
-                values,
-                "id = ?",
-                new String[]{QueueDatabase.stableSmsId(sender, body, receivedAt, 0)});
+        QueueItem item = database.claimReady(
+                Math.max(System.currentTimeMillis(), receivedAt) + 1_000L, 1).get(0);
+        long acceptedAt = database.markDelivered(item.id, 1, succeededAt);
+        database.completeAcceptedDelivery(
+                item.id,
+                item.attempts,
+                "SMTP 服务器已接受邮件",
+                acceptedAt);
     }
 }

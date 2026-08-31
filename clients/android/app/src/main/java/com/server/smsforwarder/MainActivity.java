@@ -3775,7 +3775,7 @@ public final class MainActivity extends Activity {
         }
         LocalDayWindow today = LocalDayWindow.containing(
                 System.currentTimeMillis(), TimeZone.getDefault());
-        int successToday = QueueDatabase.get(this).successfulHistoryCount(
+        long successToday = QueueDatabase.get(this).successfulDeliveryCount(
                 today.startInclusive, today.endExclusive);
         LinearLayout summary = new LinearLayout(this);
         summary.setPadding(dp(7), dp(8), dp(7), dp(8));

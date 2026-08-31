@@ -68,6 +68,7 @@ import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -3768,19 +3769,21 @@ public final class MainActivity extends Activity {
     }
 
     private void addHistorySummary(List<HistoryItem> history) {
-        int success = 0;
         int filtered = 0;
         for (HistoryItem item : history) {
-            if ("SUCCESS".equals(item.status)) success++;
             if ("FILTERED".equals(item.status)) filtered++;
         }
+        LocalDayWindow today = LocalDayWindow.containing(
+                System.currentTimeMillis(), TimeZone.getDefault());
+        long successToday = QueueDatabase.get(this).successfulDeliveryCount(
+                today.startInclusive, today.endExclusive);
         LinearLayout summary = new LinearLayout(this);
         summary.setPadding(dp(7), dp(8), dp(7), dp(8));
         summary.setBackground(glassSurface(24));
         applyGlassDepth(summary, 9f, false);
         int pending = visualTestMode ? 1 : QueueDatabase.get(this).count();
         summary.addView(historyStatCell(MaterialCommunityIcons.mdi_clock, "待发", Integer.toString(pending), pending == 0 ? COLOR_JADE_DARK : COLOR_AMBER), weightedWrap());
-        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_send, "今日成功", Integer.toString(visualTestMode ? 18 : success), COLOR_JADE_DARK), weightedWrap());
+        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_send, "今日成功", Long.toString(visualTestMode ? 18L : successToday), COLOR_JADE_DARK), weightedWrap());
         summary.addView(historyStatCell(MaterialCommunityIcons.mdi_shield_outline, "已过滤", Integer.toString(visualTestMode ? 3 : filtered), COLOR_MUTED), weightedWrap());
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, 0, 0, dp(10));

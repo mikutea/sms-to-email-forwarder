@@ -31,8 +31,12 @@ final class ForwardProcessor {
                 System.currentTimeMillis(), limit, prioritizeSms);
         int processed = 0;
         for (QueueItem item : ready) {
+            long smtpAcceptedAt;
             try {
-                dispatch(database, config, item);
+                smtpAcceptedAt = dispatch(database, config, item);
+                smtpAcceptedAt = database.ensureSmtpAcceptedAt(
+                        item.id,
+                        smtpAcceptedAt > 0L ? smtpAcceptedAt : System.currentTimeMillis());
             } catch (MessagingException | RuntimeException error) {
                 int attempts = Math.min(item.attempts + 1, 1000);
                 boolean authenticationFailure = SmtpFailure.isAuthenticationFailure(error);
@@ -53,7 +57,7 @@ final class ForwardProcessor {
             }
             // Nothing after this point belongs to the SMTP failure catch. Once dispatch returns,
             // optional local bookkeeping can never turn an accepted email into a retry.
-            completeAcceptedDelivery(context, database, item);
+            completeAcceptedDelivery(context, database, item, smtpAcceptedAt);
             processed++;
         }
         long finishedAt = System.currentTimeMillis();
@@ -64,25 +68,26 @@ final class ForwardProcessor {
     }
 
     private static void completeAcceptedDelivery(
-            Context context, QueueDatabase database, QueueItem item) {
+            Context context, QueueDatabase database, QueueItem item, long smtpAcceptedAt) {
         if (QueueItem.KIND_SMS.equals(item.kind)) {
             synchronized (SmsReadFeature.operationLock()) {
-                completeAcceptedDeliveryLocked(context, database, item);
+                completeAcceptedDeliveryLocked(context, database, item, smtpAcceptedAt);
             }
             return;
         }
-        completeAcceptedDeliveryLocked(context, database, item);
+        completeAcceptedDeliveryLocked(context, database, item, smtpAcceptedAt);
     }
 
     private static void completeAcceptedDeliveryLocked(
-            Context context, QueueDatabase database, QueueItem item) {
+            Context context, QueueDatabase database, QueueItem item, long smtpAcceptedAt) {
         // The terminal history state and pending-row removal are one local transaction. If local
         // persistence fails after SMTP acceptance, the delivered-channel mask already prevents
         // an automatic SMTP resend while the worker retries this finalization.
         database.completeAcceptedDelivery(
                 item.id,
                 item.attempts,
-                "SMTP 服务器已接受邮件");
+                "SMTP 服务器已接受邮件",
+                smtpAcceptedAt);
         if (QueueItem.KIND_SMS.equals(item.kind)) {
             startReadLinkBestEffort(context, database, item);
             AppConfig.setSmsForwarded(context);
@@ -116,18 +121,19 @@ final class ForwardProcessor {
         }
     }
 
-    private static void dispatch(QueueDatabase database, AppConfig config, QueueItem item)
+    private static long dispatch(QueueDatabase database, AppConfig config, QueueItem item)
             throws MessagingException {
         final int primaryBit = 1;
         final int backupBit = 2;
         int deliveredMask = item.deliveredMask;
+        long smtpAcceptedAt = item.smtpAcceptedAt;
         MessagingException primaryError = null;
 
         if ((deliveredMask & primaryBit) == 0) {
             try {
                 SmtpMailer.send(config.primaryProfile(), item);
                 deliveredMask |= primaryBit;
-                database.markDelivered(item.id, deliveredMask);
+                smtpAcceptedAt = database.markDelivered(item.id, deliveredMask);
             } catch (MessagingException error) {
                 primaryError = error;
             }
@@ -136,22 +142,22 @@ final class ForwardProcessor {
         if (AppConfig.STRATEGY_PRIMARY_ONLY.equals(config.dispatchStrategy)
                 || !config.backupEnabled) {
             if ((deliveredMask & primaryBit) != 0) {
-                return;
+                return smtpAcceptedAt;
             }
             throw primaryError == null ? new MessagingException("主 SMTP 通道发送失败") : primaryError;
         }
 
         if (AppConfig.STRATEGY_FAILOVER.equals(config.dispatchStrategy)) {
             if ((deliveredMask & primaryBit) != 0) {
-                return;
+                return smtpAcceptedAt;
             }
             if ((deliveredMask & backupBit) != 0) {
-                return;
+                return smtpAcceptedAt;
             }
             try {
                 SmtpMailer.send(config.backupProfile(), item);
-                database.markDelivered(item.id, deliveredMask | backupBit);
-                return;
+                smtpAcceptedAt = database.markDelivered(item.id, deliveredMask | backupBit);
+                return smtpAcceptedAt;
             } catch (MessagingException backupError) {
                 if (primaryError != null) {
                     backupError.setNextException(primaryError);
@@ -164,7 +170,7 @@ final class ForwardProcessor {
             try {
                 SmtpMailer.send(config.backupProfile(), item);
                 deliveredMask |= backupBit;
-                database.markDelivered(item.id, deliveredMask);
+                smtpAcceptedAt = database.markDelivered(item.id, deliveredMask);
             } catch (MessagingException backupError) {
                 if (primaryError != null) {
                     backupError.setNextException(primaryError);
@@ -175,6 +181,7 @@ final class ForwardProcessor {
         if ((deliveredMask & primaryBit) == 0) {
             throw primaryError == null ? new MessagingException("主 SMTP 通道发送失败") : primaryError;
         }
+        return smtpAcceptedAt;
     }
 
     static long retryDelay(int attempts, boolean authenticationFailure) {

@@ -21,8 +21,8 @@ android {
         applicationId = "com.server.smsforwarder"
         minSdk = 23
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.1.1-beta.7"
+        versionCode = 20
+        versionName = "1.1.1-beta.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

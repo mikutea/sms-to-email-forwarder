@@ -13,7 +13,7 @@ import java.util.UUID;
 
 final class QueueDatabase extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "forward_queue.db";
-    private static final int DATABASE_VERSION = 7;
+    private static final int DATABASE_VERSION = 8;
     private static final long CLAIM_LEASE_MS = 5L * 60L * 1000L;
     private static final int MAX_SMS_ROWS = 500;
     private static final int MAX_NON_SMS_ROWS = 50;
@@ -21,6 +21,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
     private static final int MAX_READ_RECEIPTS = 50;
     private static final int MAX_HISTORY_ROWS = MAX_PENDING_ROWS + MAX_READ_RECEIPTS;
     private static final long MAX_PENDING_CIPHERTEXT_CHARS = 8L * 1024L * 1024L;
+    private static final long SUCCESS_STATS_RETENTION_MS = 8L * 24L * 60L * 60L * 1000L;
     private static volatile QueueDatabase instance;
     private final Context applicationContext;
 
@@ -61,11 +62,13 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + "lease_until INTEGER NOT NULL DEFAULT 0,"
                 + "delivered_mask INTEGER NOT NULL DEFAULT 0,"
                 + "read_link_generation INTEGER NOT NULL DEFAULT 0,"
+                + "smtp_accepted_at INTEGER NOT NULL DEFAULT 0,"
                 + "created_at INTEGER NOT NULL"
                 + ")");
         db.execSQL("CREATE INDEX pending_messages_next_idx "
                 + "ON pending_messages(next_attempt_at, created_at)");
         createHistoryTable(db);
+        createSuccessStatsTable(db);
         createReadReceiptTable(db);
     }
 
@@ -99,6 +102,31 @@ final class QueueDatabase extends SQLiteOpenHelper {
             db.execSQL(
                     "ALTER TABLE pending_messages "
                             + "ADD COLUMN read_link_generation INTEGER NOT NULL DEFAULT 0");
+        }
+        if (oldVersion < 8) {
+            db.execSQL(
+                    "ALTER TABLE pending_messages "
+                            + "ADD COLUMN smtp_accepted_at INTEGER NOT NULL DEFAULT 0");
+            if (oldVersion >= 4) {
+                db.execSQL(
+                        "ALTER TABLE message_history "
+                                + "ADD COLUMN succeeded_at INTEGER NOT NULL DEFAULT 0");
+            }
+            // Older schemas did not preserve SMTP acceptance separately from later detail
+            // updates. Backfill the best available timestamp once; all new deliveries record
+            // the exact acceptance transition without being moved by read-receipt settlement.
+            db.execSQL(
+                    "UPDATE message_history SET succeeded_at = updated_at "
+                            + "WHERE status = 'SUCCESS' AND succeeded_at = 0");
+            createHistorySuccessIndex(db);
+            createSuccessStatsTable(db);
+            db.execSQL(
+                    "INSERT OR REPLACE INTO delivery_success_minutes "
+                            + "(bucket_start, success_count) "
+                            + "SELECT (succeeded_at / 60000) * 60000, COUNT(*) "
+                            + "FROM message_history "
+                            + "WHERE status = 'SUCCESS' AND succeeded_at > 0 "
+                            + "GROUP BY (succeeded_at / 60000) * 60000");
         }
     }
 
@@ -209,6 +237,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             values.put("next_attempt_at", now);
             values.put("lease_until", 0L);
             values.put("delivered_mask", 0);
+            values.put("smtp_accepted_at", 0L);
             values.put("created_at", now);
             int updated = database.update(
                     "pending_messages",
@@ -271,6 +300,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
             values.put("lease_until", 0L);
             values.put("delivered_mask", 0);
             values.put("read_link_generation", readLinkGeneration);
+            values.put("smtp_accepted_at", 0L);
             values.put("created_at", localReceivedAt);
             boolean inserted = database.insertWithOnConflict(
                     "pending_messages",
@@ -297,7 +327,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
         database.beginTransaction();
         try (Cursor cursor = database.query(
                 "pending_messages",
-                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted", "created_at", "read_link_generation"},
+                new String[]{"id", "kind", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "attempts", "delivered_mask", "match_clue_encrypted", "created_at", "read_link_generation", "smtp_accepted_at"},
                 "next_attempt_at <= ? AND lease_until <= ?",
                 new String[]{Long.toString(now), Long.toString(now)},
                 null,
@@ -331,7 +361,8 @@ final class QueueDatabase extends SQLiteOpenHelper {
                         cursor.getInt(7),
                         CryptoStore.decrypt(cursor.getString(8)),
                         cursor.getLong(9),
-                        cursor.getLong(10)));
+                        cursor.getLong(10),
+                        cursor.getLong(11)));
             }
             database.setTransactionSuccessful();
         } finally {
@@ -363,21 +394,40 @@ final class QueueDatabase extends SQLiteOpenHelper {
                         .format(new java.util.Date(nextAttemptAt)));
     }
 
-    synchronized void markDelivered(String id, int deliveredMask) {
-        ContentValues values = new ContentValues();
-        values.put("delivered_mask", deliveredMask);
-        getWritableDatabase().update("pending_messages", values, "id = ?", new String[]{id});
+    synchronized long markDelivered(String id, int deliveredMask) {
+        return markDelivered(id, deliveredMask, System.currentTimeMillis());
+    }
+
+    synchronized long markDelivered(String id, int deliveredMask, long acceptedAt) {
+        SQLiteDatabase database = getWritableDatabase();
+        database.execSQL(
+                "UPDATE pending_messages SET delivered_mask = ?, "
+                        + "smtp_accepted_at = CASE WHEN smtp_accepted_at = 0 "
+                        + "THEN ? ELSE smtp_accepted_at END WHERE id = ?",
+                new Object[]{deliveredMask, acceptedAt, id});
+        return smtpAcceptedAt(database, id);
+    }
+
+    synchronized long ensureSmtpAcceptedAt(String id, long fallbackAcceptedAt) {
+        SQLiteDatabase database = getWritableDatabase();
+        database.execSQL(
+                "UPDATE pending_messages SET smtp_accepted_at = ? "
+                        + "WHERE id = ? AND smtp_accepted_at = 0",
+                new Object[]{fallbackAcceptedAt, id});
+        return smtpAcceptedAt(database, id);
     }
 
     synchronized void markSuccess(String id, int attempts, String detail) {
         updateHistory(id, "SUCCESS", attempts, detail);
     }
 
-    synchronized void completeAcceptedDelivery(String id, int attempts, String detail) {
+    synchronized void completeAcceptedDelivery(
+            String id, int attempts, String detail, long succeededAt) {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
-            updateHistoryLocked(database, id, "SUCCESS", attempts, detail);
+            recordSuccessfulDeliveryLocked(database, succeededAt);
+            updateHistoryLocked(database, id, "SUCCESS", attempts, detail, succeededAt);
             database.delete("pending_messages", "id = ?", new String[]{id});
             database.setTransactionSuccessful();
         } finally {
@@ -393,6 +443,21 @@ final class QueueDatabase extends SQLiteOpenHelper {
             int simSlot,
             String detail) {
         upsertHistory(id, receivedAt, sender, body, simSlot, "FILTERED", 0, detail);
+    }
+
+    synchronized long successfulDeliveryCount(long startInclusive, long endExclusive) {
+        if (endExclusive <= startInclusive) {
+            return 0;
+        }
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT COALESCE(SUM(success_count), 0) FROM delivery_success_minutes "
+                        + "WHERE bucket_start >= ? AND bucket_start < ?",
+                new String[]{
+                        Long.toString(startInclusive),
+                        Long.toString(endExclusive)
+                })) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0L;
+        }
     }
 
     List<HistoryItem> recentHistory(int limit) {
@@ -450,6 +515,7 @@ final class QueueDatabase extends SQLiteOpenHelper {
                             database,
                             "SMTP 服务器已接受邮件 · 历史与已读联动数据已由用户清除");
                     database.delete("message_history", null, null);
+                    database.delete("delivery_success_minutes", null, null);
                     database.setTransactionSuccessful();
                 } finally {
                     database.endTransaction();
@@ -789,7 +855,9 @@ final class QueueDatabase extends SQLiteOpenHelper {
         values.put("status", status);
         values.put("attempts", attempts);
         values.put("detail", sanitizeDetail(detail));
-        values.put("updated_at", System.currentTimeMillis());
+        long updatedAt = System.currentTimeMillis();
+        values.put("succeeded_at", "SUCCESS".equals(status) ? updatedAt : 0L);
+        values.put("updated_at", updatedAt);
         getWritableDatabase().insertWithOnConflict(
                 "message_history", null, values, SQLiteDatabase.CONFLICT_REPLACE);
         getWritableDatabase().delete(
@@ -821,6 +889,24 @@ final class QueueDatabase extends SQLiteOpenHelper {
         values.put("status", status);
         values.put("attempts", attempts);
         values.put("detail", sanitizeDetail(detail));
+        long updatedAt = System.currentTimeMillis();
+        values.put("succeeded_at", "SUCCESS".equals(status) ? updatedAt : 0L);
+        values.put("updated_at", updatedAt);
+        database.update("message_history", values, "id = ?", new String[]{id});
+    }
+
+    private static void updateHistoryLocked(
+            SQLiteDatabase database,
+            String id,
+            String status,
+            int attempts,
+            String detail,
+            long succeededAt) {
+        ContentValues values = new ContentValues();
+        values.put("status", status);
+        values.put("attempts", attempts);
+        values.put("detail", sanitizeDetail(detail));
+        values.put("succeeded_at", "SUCCESS".equals(status) ? succeededAt : 0L);
         values.put("updated_at", System.currentTimeMillis());
         database.update("message_history", values, "id = ?", new String[]{id});
     }
@@ -835,10 +921,59 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + "status TEXT NOT NULL,"
                 + "attempts INTEGER NOT NULL DEFAULT 0,"
                 + "detail TEXT NOT NULL DEFAULT '',"
+                + "succeeded_at INTEGER NOT NULL DEFAULT 0,"
                 + "updated_at INTEGER NOT NULL"
                 + ")");
         database.execSQL("CREATE INDEX IF NOT EXISTS message_history_updated_idx "
                 + "ON message_history(updated_at DESC)");
+        createHistorySuccessIndex(database);
+    }
+
+    private static void createHistorySuccessIndex(SQLiteDatabase database) {
+        database.execSQL("CREATE INDEX IF NOT EXISTS message_history_success_idx "
+                + "ON message_history(status, succeeded_at)");
+    }
+
+    private static void createSuccessStatsTable(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS delivery_success_minutes ("
+                + "bucket_start INTEGER PRIMARY KEY,"
+                + "success_count INTEGER NOT NULL"
+                + ")");
+    }
+
+    private static void recordSuccessfulDeliveryLocked(
+            SQLiteDatabase database, long succeededAt) {
+        long safeSucceededAt = succeededAt > 0L ? succeededAt : System.currentTimeMillis();
+        long bucketStart = Math.floorDiv(safeSucceededAt, 60_000L) * 60_000L;
+        ContentValues values = new ContentValues();
+        values.put("bucket_start", bucketStart);
+        values.put("success_count", 1L);
+        long inserted = database.insertWithOnConflict(
+                "delivery_success_minutes", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+        if (inserted == -1L) {
+            database.execSQL(
+                    "UPDATE delivery_success_minutes "
+                            + "SET success_count = success_count + 1 WHERE bucket_start = ?",
+                    new Object[]{bucketStart});
+        }
+        database.delete(
+                "delivery_success_minutes",
+                "bucket_start < ?",
+                new String[]{Long.toString(bucketStart - SUCCESS_STATS_RETENTION_MS)});
+    }
+
+    private static long smtpAcceptedAt(SQLiteDatabase database, String id) {
+        try (Cursor cursor = database.query(
+                "pending_messages",
+                new String[]{"smtp_accepted_at"},
+                "id = ?",
+                new String[]{id},
+                null,
+                null,
+                null,
+                "1")) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0L;
+        }
     }
 
     private static void createReadReceiptTable(SQLiteDatabase database) {

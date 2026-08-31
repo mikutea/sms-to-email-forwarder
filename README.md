@@ -6,11 +6,11 @@
 
 雁笺是一款面向自有 Android / 鸿蒙 2–4 设备的短信转邮箱应用。新短信在手机本地进入加密队列，再直连用户自己的 SMTP 服务；不需要第三方中继服务器、Root 或无障碍权限。可选的“成功后标记已读”默认关闭，只有用户主动授予系统通知使用权后才工作，且不作为短信接收来源。
 
-> 当前稳定版：`v1.1.0`。正式版与 Beta 使用同一签名，可覆盖安装并保留本机配置。厂商启动管理不存在普通 App 可统一弹出的标准授权框，雁笺会打开设备可用的系统入口，并在返回后立即确认结果。
+> 当前稳定版：`v1.1.1`。正式版与 Beta 使用同一签名，可覆盖安装并保留本机配置。厂商启动管理不存在普通 App 可统一弹出的标准授权框，雁笺会打开设备可用的系统入口，并在返回后立即确认结果。
 
-[下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.0.apk) · [查看发布说明](docs/release-notes/1.1.0.md) · [安装与后台设置](docs/harmonyos-4-install.md)
+[下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.1.apk) · [查看发布说明](docs/release-notes/1.1.1.md) · [安装与后台设置](docs/harmonyos-4-install.md)
 
-> 当前测试版：[`v1.1.1-beta.8`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.8)，将“今日成功”改为按手机本地自然日和 SMTP 实际接受时间统计；已读联动在系统没有安全动作时会明确收敛，但不会影响邮件成功状态。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.8/yanjian-v1.1.1-beta.8.apk)
+> 当前没有比 `v1.1.1` 更新的测试版。Beta 用户可以直接覆盖安装稳定版；邮箱配置、规则、权限、旅行守护状态、待发队列和本机历史会保留。历史 Beta 仍可在 [Releases](https://github.com/mikutea/sms-to-email-forwarder/releases) 中查看。
 
 ## 应用截图
 
@@ -54,7 +54,7 @@ Beta 6 新增的默认关闭已读联动与通知授权说明：
 
 | 平台 | 自动读取新短信 | 客户端形态 | 当前状态 |
 | --- | --- | --- | --- |
-| Android 6.0（API 23）及以上 | 支持 | APK | `v1.1.0` |
+| Android 6.0（API 23）及以上 | 支持 | APK | `v1.1.1` |
 | 保留 Android APK 兼容能力的 HarmonyOS 设备 | 支持 | 与 Android 共用 APK | 需要按设备和系统版本完成真机验证 |
 | HarmonyOS NEXT | 普通三方应用无公开短信读取能力 | 原生 HAP 只能承担配置、状态等伴随功能 | 不宣称支持自动短信转发 |
 

@@ -10,7 +10,7 @@
 
 [下载最新稳定版 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/latest/download/yanjian-v1.1.0.apk) · [查看发布说明](docs/release-notes/1.1.0.md) · [安装与后台设置](docs/harmonyos-4-install.md)
 
-> 当前测试版：[`v1.1.1-beta.6`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.6)，修复历史待发消息长期停留、立即重试不立即和心跳重复堆积，并新增默认关闭的安全短信已读联动。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.6/yanjian-v1.1.1-beta.6.apk)
+> 当前测试版：[`v1.1.1-beta.7`](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1-beta.7)，在 Beta 6 的队列自愈和可选已读联动基础上，修复部分厂商延迟后台清理后状态长期停在“正在请求”的问题。[直接下载 APK](https://github.com/mikutea/sms-to-email-forwarder/releases/download/v1.1.1-beta.7/yanjian-v1.1.1-beta.7.apk)
 
 ## 应用截图
 

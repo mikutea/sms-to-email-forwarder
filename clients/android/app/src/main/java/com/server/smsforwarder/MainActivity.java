@@ -234,6 +234,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        try {
+            // Huawei and other vendor power managers may postpone WorkManager after the logical
+            // read-link TTL. Reconcile on every foreground return so the UI and encrypted
+            // temporary data converge immediately without waiting for the vendor scheduler.
+            QueueDatabase.get(this).expireReadReceipts(System.currentTimeMillis());
+        } catch (RuntimeException error) {
+            ReadReceiptCleanupWorker.scheduleReceiptReconcile(this);
+        }
         if (SmsReadFeature.isEnabled(this) && !SmsReadFeature.hasNotificationAccess(this)) {
             SmsReadFeature.disableAndScheduleCleanup(this);
         }

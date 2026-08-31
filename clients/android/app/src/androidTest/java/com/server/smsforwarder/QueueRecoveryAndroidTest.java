@@ -453,6 +453,27 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
+    public void historyReadSettlesExpiredReceiptWhenVendorWorkerIsDelayed() {
+        long now = System.currentTimeMillis();
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10003", "虚构的厂商延迟清理测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markSuccess(
+                item.id,
+                1,
+                "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
+        database.remove(item.id);
+        database.enqueueReadReceipt(item, now - 1L);
+
+        List<HistoryItem> history = database.recentHistory(5);
+
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).detail.contains("未标记已读"));
+        assertFalse(database.hasReadReceipt(item.id));
+        assertEquals(0L, database.earliestReadReceiptExpiry());
+    }
+
+    @Test
     public void canceledReadReceiptDoesNotLeaveHistoryPendingForever() {
         long now = System.currentTimeMillis();
         assertEquals(QueueDatabase.EnqueueResult.INSERTED,

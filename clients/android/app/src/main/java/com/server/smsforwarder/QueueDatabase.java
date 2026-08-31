@@ -403,30 +403,38 @@ final class QueueDatabase extends SQLiteOpenHelper {
         upsertHistory(id, receivedAt, sender, body, simSlot, "FILTERED", 0, detail);
     }
 
-    synchronized List<HistoryItem> recentHistory(int limit) {
-        List<HistoryItem> items = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                "message_history",
-                new String[]{"id", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "status", "attempts", "detail"},
-                null,
-                null,
-                null,
-                null,
-                "updated_at DESC",
-                Integer.toString(Math.max(1, Math.min(limit, 200))))) {
-            while (cursor.moveToNext()) {
-                items.add(new HistoryItem(
-                        cursor.getString(0),
-                        cursor.getLong(1),
-                        CryptoStore.decrypt(cursor.getString(2)),
-                        CryptoStore.decrypt(cursor.getString(3)),
-                        cursor.getInt(4),
-                        cursor.getString(5),
-                        cursor.getInt(6),
-                        cursor.getString(7)));
+    List<HistoryItem> recentHistory(int limit) {
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                // Vendor power managers may defer WorkManager well past the logical receipt TTL.
+                // A history read must never keep showing an already-expired request as active, and
+                // it is also a safe foreground opportunity to erase the encrypted match clue.
+                expireReadReceiptsLocked(System.currentTimeMillis());
+                List<HistoryItem> items = new ArrayList<>();
+                try (Cursor cursor = getReadableDatabase().query(
+                        "message_history",
+                        new String[]{"id", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "status", "attempts", "detail"},
+                        null,
+                        null,
+                        null,
+                        null,
+                        "updated_at DESC",
+                        Integer.toString(Math.max(1, Math.min(limit, 200))))) {
+                    while (cursor.moveToNext()) {
+                        items.add(new HistoryItem(
+                                cursor.getString(0),
+                                cursor.getLong(1),
+                                CryptoStore.decrypt(cursor.getString(2)),
+                                CryptoStore.decrypt(cursor.getString(3)),
+                                cursor.getInt(4),
+                                cursor.getString(5),
+                                cursor.getInt(6),
+                                cursor.getString(7)));
+                    }
+                }
+                return items;
             }
         }
-        return items;
     }
 
     void clearHistory() {

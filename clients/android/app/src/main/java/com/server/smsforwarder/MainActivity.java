@@ -234,8 +234,19 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // A revoked device-level grant is an explicit user privacy decision. Process it before
+        // ordinary TTL settlement so even an already-expired request records the accurate
+        // "feature disabled" outcome and all linkage clues are cleared through the opt-out path.
         if (SmsReadFeature.isEnabled(this) && !SmsReadFeature.hasNotificationAccess(this)) {
             SmsReadFeature.disableAndScheduleCleanup(this);
+        }
+        try {
+            // Huawei and other vendor power managers may postpone WorkManager after the logical
+            // read-link TTL. Reconcile on every foreground return so the UI and encrypted
+            // temporary data converge immediately without waiting for the vendor scheduler.
+            QueueDatabase.get(this).expireReadReceipts(System.currentTimeMillis());
+        } catch (RuntimeException error) {
+            ReadReceiptCleanupWorker.scheduleReceiptReconcile(this);
         }
         if (firstResume) {
             firstResume = false;

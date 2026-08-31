@@ -102,14 +102,6 @@ final class QueueDatabase extends SQLiteOpenHelper {
         }
     }
 
-    @Override
-    public void onOpen(SQLiteDatabase db) {
-        super.onOpen(db);
-        if (!db.isReadOnly()) {
-            purgeExpiredReadReceipts(db, System.currentTimeMillis());
-        }
-    }
-
     synchronized EnqueueResult enqueueSms(String sender, String body, long receivedAt, int simSlot) {
         return enqueueSms(sender, body, "", receivedAt, System.currentTimeMillis(), simSlot, 0L);
     }
@@ -403,28 +395,47 @@ final class QueueDatabase extends SQLiteOpenHelper {
         upsertHistory(id, receivedAt, sender, body, simSlot, "FILTERED", 0, detail);
     }
 
-    synchronized List<HistoryItem> recentHistory(int limit) {
+    List<HistoryItem> recentHistory(int limit) {
+        boolean cleanupDeferred = false;
         List<HistoryItem> items = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                "message_history",
-                new String[]{"id", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "status", "attempts", "detail"},
-                null,
-                null,
-                null,
-                null,
-                "updated_at DESC",
-                Integer.toString(Math.max(1, Math.min(limit, 200))))) {
-            while (cursor.moveToNext()) {
-                items.add(new HistoryItem(
-                        cursor.getString(0),
-                        cursor.getLong(1),
-                        CryptoStore.decrypt(cursor.getString(2)),
-                        CryptoStore.decrypt(cursor.getString(3)),
-                        cursor.getInt(4),
-                        cursor.getString(5),
-                        cursor.getInt(6),
-                        cursor.getString(7)));
+        synchronized (SmsReadFeature.operationLock()) {
+            synchronized (this) {
+                // Vendor power managers may defer WorkManager well past the logical receipt TTL.
+                // A history read must never keep showing an already-expired request as active, and
+                // it is also a safe foreground opportunity to erase the encrypted match clue.
+                try {
+                    expireReadReceiptsLocked(System.currentTimeMillis());
+                } catch (RuntimeException error) {
+                    // History is still useful when SQLite can read but a transient condition such
+                    // as full storage rejects writes. Preserve the read path and retry settlement
+                    // through durable work instead of crashing the activity.
+                    cleanupDeferred = true;
+                }
+                try (Cursor cursor = getReadableDatabase().query(
+                        "message_history",
+                        new String[]{"id", "received_at", "sender_encrypted", "body_encrypted", "sim_slot", "status", "attempts", "detail"},
+                        null,
+                        null,
+                        null,
+                        null,
+                        "updated_at DESC",
+                        Integer.toString(Math.max(1, Math.min(limit, 200))))) {
+                    while (cursor.moveToNext()) {
+                        items.add(new HistoryItem(
+                                cursor.getString(0),
+                                cursor.getLong(1),
+                                CryptoStore.decrypt(cursor.getString(2)),
+                                CryptoStore.decrypt(cursor.getString(3)),
+                                cursor.getInt(4),
+                                cursor.getString(5),
+                                cursor.getInt(6),
+                                cursor.getString(7)));
+                    }
+                }
             }
+        }
+        if (cleanupDeferred) {
+            ReadReceiptCleanupWorker.scheduleReceiptReconcile(applicationContext);
         }
         return items;
     }
@@ -841,23 +852,6 @@ final class QueueDatabase extends SQLiteOpenHelper {
                 + ")");
         database.execSQL("CREATE INDEX IF NOT EXISTS pending_read_receipts_expiry_idx "
                 + "ON pending_read_receipts(expires_at)");
-    }
-
-    private static void purgeExpiredReadReceipts(SQLiteDatabase database, long now) {
-        ContentValues history = new ContentValues();
-        history.put(
-                "detail",
-                "SMTP 服务器已接受邮件 · 系统短信未标记已读（未找到可安全调用的系统动作）");
-        history.put("updated_at", now);
-        database.update(
-                "message_history",
-                history,
-                "id IN (SELECT id FROM pending_read_receipts WHERE expires_at <= ?)",
-                new String[]{Long.toString(now)});
-        database.delete(
-                "pending_read_receipts",
-                "expires_at <= ?",
-                new String[]{Long.toString(now)});
     }
 
     private static boolean containsPending(SQLiteDatabase database, String id) {

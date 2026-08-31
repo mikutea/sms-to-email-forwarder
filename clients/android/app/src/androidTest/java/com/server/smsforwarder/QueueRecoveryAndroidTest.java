@@ -453,14 +453,63 @@ public final class QueueRecoveryAndroidTest {
     }
 
     @Test
-    public void canceledReadReceiptDoesNotLeaveHistoryPendingForever() {
+    public void historyReadSettlesExpiredReceiptWhenVendorWorkerIsDelayed() {
+        long now = System.currentTimeMillis();
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10003", "虚构的厂商延迟清理测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markSuccess(
+                item.id,
+                1,
+                "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
+        database.remove(item.id);
+        database.enqueueReadReceipt(item, now - 1L);
+
+        List<HistoryItem> history = database.recentHistory(5);
+
+        assertEquals(1, history.size());
+        assertTrue(history.get(0).detail.contains("未标记已读"));
+        assertFalse(database.hasReadReceipt(item.id));
+        assertEquals(0L, database.earliestReadReceiptExpiry());
+    }
+
+    @Test
+    public void historyRemainsReadableWhenExpirySettlementCannotWrite() {
+        long now = System.currentTimeMillis();
+        assertEquals(QueueDatabase.EnqueueResult.INSERTED,
+                database.enqueueSms("10004", "虚构的只读历史测试", now, 0));
+        QueueItem item = database.claimReady(now + 1_000L, 1).get(0);
+        database.markSuccess(
+                item.id,
+                1,
+                "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
+        database.remove(item.id);
+        database.enqueueReadReceipt(item, now - 1L);
+
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.execSQL("PRAGMA query_only = ON");
+        try {
+            List<HistoryItem> history = database.recentHistory(5);
+            assertEquals(1, history.size());
+            assertEquals(item.id, history.get(0).id);
+        } finally {
+            writable.execSQL("PRAGMA query_only = OFF");
+        }
+    }
+
+    @Test
+    public void revokedAccessCleanupWinsEvenAfterReadReceiptExpiry() {
         long now = System.currentTimeMillis();
         assertEquals(QueueDatabase.EnqueueResult.INSERTED,
                 database.enqueueSms("10002", "虚构的关闭已读联动测试", now, 0));
         QueueItem item = database.claimReady(System.currentTimeMillis() + 1_000L, 1).get(0);
         database.markSuccess(item.id, 0, "SMTP 服务器已接受邮件 · 正在请求系统短信标记已读");
         database.remove(item.id);
-        database.enqueueReadReceipt(item, now + 60_000L);
+        database.enqueueReadReceipt(item, now - 1L);
+
+        // Reopen the helper to cover the cold-process ordering that previously let onOpen purge
+        // the expired receipt before the explicit notification-access revocation cleanup ran.
+        database.close();
 
         database.cancelReadReceipts("SMTP 服务器已接受邮件 · 已读联动已关闭");
 

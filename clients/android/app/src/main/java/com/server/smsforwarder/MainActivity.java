@@ -3783,7 +3783,7 @@ public final class MainActivity extends Activity {
         applyGlassDepth(summary, 9f, false);
         int pending = visualTestMode ? 1 : QueueDatabase.get(this).count();
         summary.addView(historyStatCell(MaterialCommunityIcons.mdi_clock, "待发", Integer.toString(pending), pending == 0 ? COLOR_JADE_DARK : COLOR_AMBER), weightedWrap());
-        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_send, "今日成功", Integer.toString(visualTestMode ? 18 : successToday), COLOR_JADE_DARK), weightedWrap());
+        summary.addView(historyStatCell(MaterialCommunityIcons.mdi_send, "今日成功", Long.toString(visualTestMode ? 18L : successToday), COLOR_JADE_DARK), weightedWrap());
         summary.addView(historyStatCell(MaterialCommunityIcons.mdi_shield_outline, "已过滤", Integer.toString(visualTestMode ? 3 : filtered), COLOR_MUTED), weightedWrap());
         LinearLayout.LayoutParams params = matchWrap();
         params.setMargins(0, 0, 0, dp(10));

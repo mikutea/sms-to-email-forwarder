@@ -1,0 +1,63 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible problem using synthetic and redacted evidence.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Do not include SMTP credentials, real SMS text, phone numbers, private email addresses, device identifiers, signing keys, or unredacted logs. Use synthetic data and the app's redacted diagnostic code only.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: For example, v1.1.1 from the official GitHub Release.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform family
+      options:
+        - Android
+        - HarmonyOS with Android APK compatibility
+        - Other / unsupported platform
+    validations:
+      required: true
+  - type: input
+    id: system-version
+    attributes:
+      label: Major system version
+      description: Provide only the Android or HarmonyOS major version needed to reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic messages and example addresses.
+      placeholder: |
+        1. Configure an example test account...
+        2. Trigger the behavior with a synthetic message...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: input
+    id: diagnostic-code
+    attributes:
+      label: Redacted diagnostic code (optional)
+      description: Do not paste raw SMTP responses or logs.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed credentials, real message content, phone numbers, private addresses, device identifiers, and unredacted logs.
+          required: true

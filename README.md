@@ -4,6 +4,20 @@
 [![Latest release](https://img.shields.io/github/v/release/mikutea/sms-to-email-forwarder?display_name=tag)](https://github.com/mikutea/sms-to-email-forwarder/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2f806e.svg)](LICENSE)
 
+## English overview
+
+### Overview and why it matters
+
+Yanjian is an Apache-2.0, privacy-first SMS-to-email relay for Android and HarmonyOS devices with APK compatibility. It helps a device owner receive new SMS messages remotely without sending them through a project relay. New messages enter an encrypted on-device queue and are delivered directly to SMTP accounts configured by the user. It targets travel and unattended-device use under fragmented mobile background and power controls.
+
+### Security model
+
+The app requires TLS or enforced STARTTLS with hostname verification, encrypts SMTP credentials and queued message data with Android Keystore-backed keys, and disables app-data backup. It does not require Root, accessibility automation, contacts, call logs, storage, or historical-SMS access. Notification access is optional, disabled by default, and used only for a best-effort semantic mark-read request after SMTP acceptance. Direct SMTP reduces third-party exposure but cannot guarantee strict exactly-once delivery.
+
+### Platform scope and verified release
+
+Android 6.0 and later are supported. APK-compatible HarmonyOS devices require device-specific background setup and validation. HarmonyOS NEXT does not run this APK and ordinary third-party apps have no public API for automatic system-SMS ingestion, so NEXT forwarding is not claimed. [v1.1.1](https://github.com/mikutea/sms-to-email-forwarder/releases/tag/v1.1.1) is a signed stable release with SHA-256 checksums, a signing certificate, a CycloneDX SBOM, GitHub build provenance, CI, and in-place upgrade plus locked-screen SMS delivery validation on one compatible HarmonyOS 4.x device. This is not presented as a broad device matrix or adoption claim.
+
 雁笺是一款面向自有 Android / 鸿蒙 2–4 设备的短信转邮箱应用。新短信在手机本地进入加密队列，再直连用户自己的 SMTP 服务；不需要第三方中继服务器、Root 或无障碍权限。可选的“成功后标记已读”默认关闭，只有用户主动授予系统通知使用权后才工作，且不作为短信接收来源。
 
 > 当前稳定版：`v1.1.1`。正式版与 Beta 使用同一签名，可覆盖安装并保留本机配置。厂商启动管理不存在普通 App 可统一弹出的标准授权框，雁笺会打开设备可用的系统入口，并在返回后立即确认结果。

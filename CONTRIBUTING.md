@@ -23,7 +23,7 @@ that preserve its privacy and platform boundaries.
    Android SDK 35:
 
    ```bash
-   ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease verifyReleaseMailHandlers
+   ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease verifyReleaseMailHandlers connectedDebugAndroidTest
    ```
 
 5. Open a pull request and complete the checklist. The exact proposed commit

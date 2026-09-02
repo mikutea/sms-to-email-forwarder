@@ -28,6 +28,16 @@ body:
       label: Official app version
     validations:
       required: true
+  - type: dropdown
+    id: test-environment
+    attributes:
+      label: Test environment
+      description: Emulator results support app behavior only and are not real-device evidence for carrier delivery, vendor background policy, or locked-screen reliability.
+      options:
+        - Physical device
+        - Android emulator
+    validations:
+      required: true
   - type: checkboxes
     id: scenarios
     attributes:
@@ -52,4 +62,6 @@ body:
       label: Privacy confirmation
       options:
         - label: This report contains only synthetic and redacted evidence and does not claim a broader device matrix than was tested.
+          required: true
+        - label: I understand that emulator-only results must not be presented as evidence of carrier delivery, vendor background behavior, locked-screen reliability, or physical-device compatibility.
           required: true

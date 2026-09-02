@@ -1,0 +1,67 @@
+name: Compatibility evidence / 兼容性验证
+description: Share redacted Android or HarmonyOS compatibility results.
+title: "[Compatibility] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Compatibility reports improve the public matrix without exposing personal device data. Report only the platform family, major system version, synthetic scenario, and redacted result. This form does not accept HarmonyOS NEXT SMS-ingestion claims without a verified public API.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform family
+      options:
+        - Android
+        - HarmonyOS with Android APK compatibility
+    validations:
+      required: true
+  - type: input
+    id: system-version
+    attributes:
+      label: Major system version
+      description: Do not include device identifiers or private account details.
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Official app version
+    validations:
+      required: true
+  - type: dropdown
+    id: test-environment
+    attributes:
+      label: Test environment
+      description: Emulator results support app behavior only and are not real-device evidence for carrier delivery, vendor background policy, or locked-screen reliability.
+      options:
+        - Physical device
+        - Android emulator
+    validations:
+      required: true
+  - type: checkboxes
+    id: scenarios
+    attributes:
+      label: Synthetic scenarios completed
+      options:
+        - label: Official release installed or upgraded in place
+        - label: SMTP test accepted using an example or private test account
+        - label: Locked-screen synthetic SMS delivery completed
+        - label: Queue returned to zero without duplicate delivery
+        - label: Network-loss recovery tested
+        - label: Reboot and first-unlock recovery tested
+  - type: textarea
+    id: notes
+    attributes:
+      label: Redacted result and limitations
+      description: State what passed, failed, or was not tested. Do not paste real messages, addresses, phone numbers, or logs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: This report contains only synthetic and redacted evidence and does not claim a broader device matrix than was tested.
+          required: true
+        - label: I understand that emulator-only results must not be presented as evidence of carrier delivery, vendor background behavior, locked-screen reliability, or physical-device compatibility.
+          required: true
